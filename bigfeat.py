@@ -16,7 +16,7 @@ class BigFeat:
         
         pass
 
-    def fit(self,X,y,gen_size=3,random_state=0):
+    def fit(self,X,y,gen_size=5,random_state=0):
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
@@ -43,6 +43,10 @@ class BigFeat:
         #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
         #gen_feats = np.hstack((gen_feats,X))
 
+        if False:
+            gen_feats, to_drop_cor = self.check_corolations(gen_feats)
+            self.op_order = np.delete(self.op_order,to_drop_cor) 
+
 
         imps = self.get_feature_importances(gen_feats,y,None,random_state)
         total_feats = np.argsort(imps)
@@ -51,6 +55,9 @@ class BigFeat:
         self.op_order = self.op_order[feat_args]
         #print(gen_feats[0,:6])
         #print('-----------------')
+
+        gen_feats = np.hstack((gen_feats,X))
+
         return gen_feats
 
     def produce(self,X):
@@ -70,6 +77,7 @@ class BigFeat:
             else:
                 print('____EROR_____')
 
+        gen_feats = np.hstack((gen_feats,X))
 
         return gen_feats
 
@@ -89,4 +97,13 @@ class BigFeat:
             return op,feat_ind_1
 
         #return op(X[:,feat_ind_1],X[:,feat_ind_2])
-        
+    
+
+    def check_corolations(self,feats):
+        cor_thresh = 0.9
+        corr_matrix = pd.DataFrame(feats).corr().abs()
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        tri_df = corr_matrix.mask(mask)
+        to_drop = [c for c in tri_df.columns if any(tri_df[c] > cor_thresh)]
+        feats = pd.DataFrame(feats).drop(to_drop,axis=1)
+        return feats.values,to_drop
