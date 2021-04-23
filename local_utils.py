@@ -35,3 +35,7 @@ def group_by(ar1,ar2):
     temp_df=pd.DataFrame({'ar1':ar1, 'ar2':ar2})
     group_res = temp_df.groupby(['ar1'])['ar2'].apply(group_by_op).to_dict() 
     return temp_df['ar1'].map(group_res).values
+
+
+def original_feat(ar1):
+    return ar1

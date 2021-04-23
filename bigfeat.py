@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
-
+import local_utils
 
 class BigFeat:
     """Base BigFeat Class"""
@@ -11,12 +11,12 @@ class BigFeat:
         self.n_jobs = 1
         self.operators = [np.multiply, np.add, np.subtract, np.abs,np.square]
         self.binary_operators = [np.multiply, np.add, np.subtract]
-        self.unary_operators = [np.abs,np.square]
+        self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
         
         pass
 
-    def fit(self,X,y,gen_size=5,random_state=0):
+    def fit(self,X,y,gen_size=2,random_state=0):
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
@@ -25,7 +25,6 @@ class BigFeat:
         self.rng = np.random.RandomState(seed=random_state)
         gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
         self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
-
 
         self.scaler = MinMaxScaler()
         self.scaler.fit(X)
@@ -40,10 +39,10 @@ class BigFeat:
 
             #gen_feats[:,i] = self.gen_feat(X)
 
+        #gen_feats = np.hstack((gen_feats,X))
 
 
-
-        imps = self.get_feature_importances(X,y,None,random_state)
+        imps = self.get_feature_importances(gen_feats,y,None,random_state)
         total_feats = np.argsort(imps)
         feat_args = total_feats[-self.n_feats:]
         gen_feats = gen_feats[:,feat_args]
