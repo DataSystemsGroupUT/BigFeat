@@ -15,7 +15,7 @@ def load_data(data_path,target_col):
     return X_train, X_test, y_train, y_test
 
 def run_rf(X_train, X_test, y_train, y_test):
-    clf = RandomForestClassifier(max_depth=2, random_state=0)
+    clf = RandomForestClassifier(random_state=0)
     clf.fit(X_train, y_train)
     y_probas_train = clf.predict_proba(X_train)[:, 1]
     y_probas_test = clf.predict_proba(X_test)[:, 1]

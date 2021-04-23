@@ -9,18 +9,22 @@ class BigFeat:
 
     def __init__(self):
         self.n_jobs = 1
-        self.operators = [np.multiply, np.add, np.subtract]
+        self.operators = [np.multiply, np.add, np.subtract, np.abs,np.square]
+        self.binary_operators = [np.multiply, np.add, np.subtract]
+        self.unary_operators = [np.abs,np.square]
+
+        
         pass
 
-    def fit(self,X,y,random_state=0):
+    def fit(self,X,y,gen_size=5,random_state=0):
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
         self.ig_vector = np.ones(self.n_feats)/self.n_feats
         #Set RNG seed if provided for numpy
         self.rng = np.random.RandomState(seed=random_state)
-        gen_feats = np.zeros((self.n_rows, self.n_feats*2))
-        self.op_order = np.zeros(self.n_feats*2, dtype='object')
+        gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
+        self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
 
 
         self.scaler = MinMaxScaler()
@@ -29,7 +33,11 @@ class BigFeat:
 
         for i in range(gen_feats.shape[1]):
             self.op_order[i] = self.gen_feat(X)
-            gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
+            if len(self.op_order[i]) == 3:
+                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
+            elif len(self.op_order[i]) == 2:
+                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
+
             #gen_feats[:,i] = self.gen_feat(X)
 
 
@@ -50,8 +58,11 @@ class BigFeat:
         gen_feats = np.zeros((self.n_rows, len(self.op_order)))
 
         for i in range(len(self.op_order)):
-            gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
-        #print(gen_feats[0,:6])
+            if len(self.op_order[i]) == 3:
+                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
+            elif len(self.op_order[i]) == 2:
+                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
+                #print(gen_feats[0,:6])
 
 
         return gen_feats
@@ -66,7 +77,10 @@ class BigFeat:
         feat_ind_1 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
         feat_ind_2 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
         op = self.rng.choice(self.operators)
-        return op,feat_ind_1,feat_ind_2
-        
+        if op in self.binary_operators:
+            return op,feat_ind_1,feat_ind_2
+        elif op in self.unary_operators:
+            return op,feat_ind_1
+
         #return op(X[:,feat_ind_1],X[:,feat_ind_2])
         
