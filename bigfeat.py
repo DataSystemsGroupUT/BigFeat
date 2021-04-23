@@ -16,7 +16,7 @@ class BigFeat:
         
         pass
 
-    def fit(self,X,y,gen_size=2,random_state=0):
+    def fit(self,X,y,gen_size=3,random_state=0):
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
@@ -36,9 +36,11 @@ class BigFeat:
                 gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
             elif len(self.op_order[i]) == 2:
                 gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
-
+            else:
+                print('____EROR_____')
             #gen_feats[:,i] = self.gen_feat(X)
 
+        #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
         #gen_feats = np.hstack((gen_feats,X))
 
 
@@ -57,11 +59,16 @@ class BigFeat:
         gen_feats = np.zeros((self.n_rows, len(self.op_order)))
 
         for i in range(len(self.op_order)):
-            if len(self.op_order[i]) == 3:
+            if type(self.op_order[i]) == int:
+                gen_feats[:,i] = self.op_order[i]
+            elif len(self.op_order[i]) == 3:
                 gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
             elif len(self.op_order[i]) == 2:
                 gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
                 #print(gen_feats[0,:6])
+
+            else:
+                print('____EROR_____')
 
 
         return gen_feats
