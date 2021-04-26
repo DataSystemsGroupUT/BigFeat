@@ -42,10 +42,10 @@ class BigFeat:
                 print('____EROR_____')
             #gen_feats[:,i] = self.gen_feat(X)
 
-        self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
-        gen_feats = np.hstack((gen_feats,X))
+        #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
+        #gen_feats = np.hstack((gen_feats,X))
 
-        if False:
+        if True:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order,to_drop_cor) 
 
@@ -71,6 +71,9 @@ class BigFeat:
         #print('-----------------')
 
         #gen_feats = np.hstack((gen_feats,X))
+        #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
+        #gen_feats = np.hstack((gen_feats,X))
+
         if False:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order ,to_drop_cor) 
@@ -118,7 +121,7 @@ class BigFeat:
     
 
     def check_corolations(self,feats):
-        cor_thresh = 0.9
+        cor_thresh = 0.8
         corr_matrix = pd.DataFrame(feats).corr().abs()
         mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
         tri_df = corr_matrix.mask(mask)

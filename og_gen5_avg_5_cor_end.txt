@@ -1,0 +1,35 @@
+--------- Running: data/banknote.csv ---------
+Raw:
+[1.         0.99981272]
+BigFeat:
+[1.         0.99529499]
+--------- Running: data/phoneme.csv ---------
+Raw:
+[1.         0.96068567]
+BigFeat:
+[1.         0.90300378]
+--------- Running: data/eeg-eye.csv ---------
+Raw:
+[1.         0.98209149]
+BigFeat:
+[1.         0.93875863]
+--------- Running: data/spambase.csv ---------
+Raw:
+[0.99999932 0.98805318]
+BigFeat:
+[0.99985356 0.9802299 ]
+--------- Running: data/valley.csv ---------
+Raw:
+[1.         0.58100514]
+BigFeat:
+[1.         0.90527261]
+--------- Running: data/nomao.csv ---------
+Raw:
+[0.99999849 0.99424157]
+BigFeat:
+[0.9999983  0.99314298]
+--------- Running: data/gina.csv ---------
+Raw:
+[1.         0.98006269]
+BigFeat:
+[1.         0.98098772]

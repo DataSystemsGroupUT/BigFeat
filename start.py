@@ -23,26 +23,26 @@ def run_rf(X_train, X_test, y_train, y_test, random_state=0):
     roc_test = roc_auc_score(y_test, y_probas_test)
     return np.array((roc_train, roc_test))
 
-def run_test(data_path,target_col,runs=1):
+def run_test(data_path,target_col,runs=5):
     print("--------- Running: {} ---------".format(data_path))
-    X_train, X_test, y_train, y_test = load_data(data_path,target_col)
-    print('Raw:')
-    rs = 0
+    og_rs = np.zeros(2)
+    bf_rs = np.zeros(2)
+
     for i in range(runs):
-        rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
-    rs /= runs
-    print(rs)
-    print('BigFeat:')
-    rs = 0
-    for i in range(runs):
+        X_train, X_test, y_train, y_test = load_data(data_path,target_col,random_state=i)
+        og_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
         bf = bigfeat.BigFeat()
         X_train = bf.fit(X_train, y_train,random_state=i)
         X_test = bf.produce(X_test)
-        rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
-    rs /= runs
-    print(rs)
+        bf_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
+    og_rs /= runs
+    bf_rs /= runs
+    print('Raw:')
+    print(og_rs)
+    print('BigFeat:')
+    print(bf_rs)
 
 
 if __name__ == "__main__":
     for dataset in paths:
-        run_test(dataset[0],dataset[1])
+        run_test(dataset[0],dataset[1],runs= 5)
