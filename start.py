@@ -6,6 +6,7 @@ from sklearn.metrics import roc_auc_score
 from paths import paths
 import bigfeat
 
+
 def load_data(data_path,target_col,random_state=0): 
     df = pd.read_csv(data_path)
     X = df.drop(columns=[target_col])

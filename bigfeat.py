@@ -5,7 +5,6 @@ from sklearn.ensemble import RandomForestClassifier
 import local_utils
 from sklearn.feature_selection import SequentialFeatureSelector
 
-
 class BigFeat:
     """Base BigFeat Class"""
 
@@ -45,7 +44,7 @@ class BigFeat:
         #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
         #gen_feats = np.hstack((gen_feats,X))
 
-        if True:
+        if False:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order,to_drop_cor) 
 
