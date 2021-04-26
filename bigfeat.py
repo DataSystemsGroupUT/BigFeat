@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 import local_utils
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
 
 class BigFeat:
@@ -114,15 +115,18 @@ class BigFeat:
     
     def get_weighted_feature_importances(self,X,y,estimator,random_state):
         """Return feature importances by specifeid method """
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=random_state)
+        
         estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
-        estm.fit(X,y)
+        estm.fit(X_train,y_train)
         ests = estm.estimators_
         model = estm
         imps = np.zeros((len(model.estimators_),X.shape[1]))
         scores = np.zeros(len(model.estimators_))
         for i,each in enumerate(model.estimators_):
-            y_probas_train = each.predict_proba(X)[:, 1]
-            roc_train = roc_auc_score(y, y_probas_train)
+            y_probas_train = each.predict_proba(X_test)[:, 1]
+            roc_train = roc_auc_score(y_test, y_probas_train)
             #print(roc_train)
             imps[i]=each.feature_importances_
             scores[i] = roc_train
@@ -155,7 +159,7 @@ class BigFeat:
         return feats.values,to_drop
 
     def seq_importances(self, X,y, random_state=0):
-        estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
+        #estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
         sfs = SequentialFeatureSelector(estm, n_features_to_select=self.n_feats)
         sfs.fit(X, y)
         return sfs.get_support()
