@@ -4,6 +4,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
 import local_utils
 from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.metrics import roc_auc_score
+
 
 class BigFeat:
     """Base BigFeat Class"""
@@ -41,8 +43,8 @@ class BigFeat:
                 print('____EROR_____')
             #gen_feats[:,i] = self.gen_feat(X)
 
-        #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
-        #gen_feats = np.hstack((gen_feats,X))
+        self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
+        gen_feats = np.hstack((gen_feats,X))
 
         if False:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
@@ -52,7 +54,9 @@ class BigFeat:
 
         #OG SELECTION
 
-        imps = self.get_feature_importances(gen_feats,y,None,random_state)
+        #imps = self.get_feature_importances(gen_feats,y,None,random_state)
+        imps = self.get_weighted_feature_importances(gen_feats,y,None,random_state)
+      
         total_feats = np.argsort(imps)
         feat_args = total_feats[-self.n_feats:]
         gen_feats = gen_feats[:,feat_args]
@@ -106,6 +110,28 @@ class BigFeat:
         estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
         estm.fit(X,y)
         return estm.feature_importances_
+
+    
+    def get_weighted_feature_importances(self,X,y,estimator,random_state):
+        """Return feature importances by specifeid method """
+        estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
+        estm.fit(X,y)
+        ests = estm.estimators_
+        model = estm
+        imps = np.zeros((len(model.estimators_),X.shape[1]))
+        scores = np.zeros(len(model.estimators_))
+        for i,each in enumerate(model.estimators_):
+            y_probas_train = each.predict_proba(X)[:, 1]
+            roc_train = roc_auc_score(y, y_probas_train)
+            #print(roc_train)
+            imps[i]=each.feature_importances_
+            scores[i] = roc_train
+        #return np.array((roc_train, roc_test))
+        weights = scores/scores.sum()
+
+
+        return np.average(imps,axis=0, weights=weights)
+
 
     def gen_feat(self, X):
         feat_ind_1 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
