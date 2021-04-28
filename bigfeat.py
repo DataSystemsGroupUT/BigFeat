@@ -44,10 +44,10 @@ class BigFeat:
                 print('____EROR_____')
             #gen_feats[:,i] = self.gen_feat(X)
 
-        self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
-        gen_feats = np.hstack((gen_feats,X))
+        #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
+        #gen_feats = np.hstack((gen_feats,X))
 
-        if False:
+        if True:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order,to_drop_cor) 
 
@@ -55,8 +55,8 @@ class BigFeat:
 
         #OG SELECTION
 
-        #imps = self.get_feature_importances(gen_feats,y,None,random_state)
-        imps = self.get_weighted_feature_importances(gen_feats,y,None,random_state)
+        imps = self.get_feature_importances(gen_feats,y,None,random_state)
+        #imps = self.get_weighted_feature_importances(gen_feats,y,None,random_state)
       
         total_feats = np.argsort(imps)
         feat_args = total_feats[-self.n_feats:]
@@ -76,7 +76,7 @@ class BigFeat:
 
         #gen_feats = np.hstack((gen_feats,X))
         #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
-        #gen_feats = np.hstack((gen_feats,X))
+        gen_feats = np.hstack((gen_feats,X))
 
         if False:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
@@ -103,7 +103,7 @@ class BigFeat:
             else:
                 print('____EROR_____')
 
-        #gen_feats = np.hstack((gen_feats,X))
+        gen_feats = np.hstack((gen_feats,X))
         return gen_feats
 
     def get_feature_importances(self,X,y,estimator,random_state):
