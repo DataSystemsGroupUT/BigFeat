@@ -24,7 +24,7 @@ def run_rf(X_train, X_test, y_train, y_test, random_state=0):
     roc_test = roc_auc_score(y_test, y_probas_test)
     return np.array((roc_train, roc_test))
 
-def run_test(data_path,target_col,runs=5):
+def run_test(data_path,target_col,runs=10):
     print("--------- Running: {} ---------".format(data_path))
     og_rs = np.zeros(2)
     bf_rs = np.zeros(2)
@@ -33,7 +33,7 @@ def run_test(data_path,target_col,runs=5):
         X_train, X_test, y_train, y_test = load_data(data_path,target_col,random_state=i)
         og_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
         bf = bigfeat.BigFeat()
-        X_train = bf.fit(X_train, y_train,random_state=i)
+        X_train = bf.fit(X_train, y_train,random_state=i,feat_imps=True)
         X_test = bf.produce(X_test)
         bf_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
     og_rs /= runs
@@ -46,4 +46,4 @@ def run_test(data_path,target_col,runs=5):
 
 if __name__ == "__main__":
     for dataset in paths:
-        run_test(dataset[0],dataset[1],runs= 10)
+        run_test(dataset[0],dataset[1],runs= 5)

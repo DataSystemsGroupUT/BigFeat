@@ -17,10 +17,14 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
+        self.tracking_ops = []
+        self.tracking_ids = []
+        self._gen_ind = -1
+        self._feat_ind_pos = 1
         
         pass
 
-    def fit(self,X,y,gen_size=5,random_state=0):
+    def fit(self,X,y,gen_size=5,random_state=0, feat_imps = False):
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
@@ -34,6 +38,11 @@ class BigFeat:
         self.scaler.fit(X)
         X = self.scaler.transform(X)
 
+        if feat_imps:
+            self.ig_vector = self.get_feature_importances(X,y,None,random_state)
+            self.ig_vector /= self.ig_vector.sum()
+
+
         for i in range(gen_feats.shape[1]):
             self.op_order[i] = self.gen_feat(X)
             if len(self.op_order[i]) == 3:
@@ -43,6 +52,31 @@ class BigFeat:
             else:
                 print('____EROR_____')
             #gen_feats[:,i] = self.gen_feat(X)
+
+
+
+
+        #print("------------------------------")
+        a = self.feat_with_depth(X,3)
+        #self.feat_with_depth(X,2)
+        #self.feat_with_depth(X,1)
+        #self.feat_with_depth(X,0)
+        #b = self.prod_with_detph(X)
+        print(self.tracking_ops)
+
+        b = self.feat_with_depth_gen(X,3)
+
+        #print('Gen:')
+        #print(a)
+        #print('Prod:')
+        #print(b)
+        print(np.allclose(a,b))
+        #print('Dat:')
+        #print(self.tracking_ids)
+        #print(X)
+        #print(a)
+        #print("DATA")
+        #print(X)
 
         #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
         #gen_feats = np.hstack((gen_feats,X))
@@ -148,6 +182,128 @@ class BigFeat:
 
         #return op(X[:,feat_ind_1],X[:,feat_ind_2])
     
+    # def feat_with_depth(self, X, depth):
+    #     if depth == 0:
+    #         feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
+    #         self.tracking_ids.append(feat_ind)
+    #         return X[:,feat_ind]
+    #     depth -= 1
+    #     op = self.rng.choice(self.operators)
+    #     if op in self.binary_operators:
+    #         feat_1 = self.feat_with_depth(X,depth)
+    #         feat_2 = self.feat_with_depth(X,depth)
+    #         self.tracking_ops.append((op,depth))
+    #         return op(feat_1,feat_2)
+    #     elif op in self.unary_operators:
+    #         self.tracking_ops.append((op,depth))
+    #         feat_1 = self.feat_with_depth(X,depth)
+    #         return op(feat_1)
+
+    #     #return op(X[:,feat_ind_1],X[:,feat_ind_2])
+
+
+
+
+
+
+    # def feat_with_depth_gen(self, X, depth):
+    #     if depth == 0:
+    #         #print('aaa')
+    #         feat_ind = self.tracking_ids.pop()
+    #         return X[:,feat_ind]
+    #     #print('bbbb')
+    #     depth -= 1
+    #     op = self.tracking_ops.pop()[0]
+    #     #print(op)
+    #     if op in self.binary_operators:
+    #         feat_1 = self.feat_with_depth_gen(X,depth)
+    #         feat_2 = self.feat_with_depth_gen(X,depth)
+    #         return op(feat_1,feat_2)
+    #     elif op in self.unary_operators:
+    #         feat_1 = self.feat_with_depth_gen(X,depth)
+    #         return op(feat_1)
+
+
+    def feat_with_depth(self, X, depth):
+        if depth == 0:
+            feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
+            self.tracking_ids.append(feat_ind)
+            return X[:,feat_ind]
+        depth -= 1
+        op = self.rng.choice(self.operators)
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth(X,depth)
+            feat_2 = self.feat_with_depth(X,depth)
+            self.tracking_ops.append((op,depth))
+            return op(feat_1,feat_2)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth(X,depth)
+            self.tracking_ops.append((op,depth))
+            return op(feat_1)
+
+        #return op(X[:,feat_ind_1],X[:,feat_ind_2])
+
+
+
+
+
+
+    def feat_with_depth_gen(self, X, depth):
+        if depth == 0:
+            #print('aaa')
+            feat_ind = self.tracking_ids.pop()
+            return X[:,feat_ind]
+        #print('bbbb')
+        depth -= 1
+        op = self.tracking_ops.pop()[0]
+        #print(op)
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth)
+            feat_2 = self.feat_with_depth_gen(X,depth)
+            return op(feat_2,feat_1)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth)
+            return op(feat_1)
+
+
+
+
+
+
+    def prod_with_detph(self,X):
+        self._gen_ind += 1
+        if self.tracking_ops[-self._gen_ind][1] == 0:
+            op = self.tracking_ops[self._gen_ind][0]
+            print(op)
+            if op in self.binary_operators:
+                feat_ind = self.tracking_ids[-self._feat_ind_pos]
+                print(feat_ind)
+                self._feat_ind_pos += 1
+                feat_1 = X[:,feat_ind]
+                feat_ind = self.tracking_ids[-self._feat_ind_pos]
+                print(feat_ind)
+
+                self._feat_ind_pos += 1
+                feat_2 = X[:,feat_ind]
+                return op(feat_1,feat_2)
+            elif op in self.unary_operators:
+                feat_ind = self.tracking_ids[-self._feat_ind_pos]
+                self._feat_ind_pos += 1
+                print(feat_ind)
+
+                feat_1 = X[:,feat_ind]
+                return op(feat_1)
+        op = self.tracking_ops[self._gen_ind][0]
+        print(op)
+
+        if op in self.binary_operators:
+            feat_1 = self.prod_with_detph(X)
+            feat_2 = self.prod_with_detph(X)
+            return op(feat_1,feat_2)
+        elif op in self.unary_operators:
+            feat_1 = self.prod_with_detph(X)
+            return op(feat_1)
+
 
     def check_corolations(self,feats):
         cor_thresh = 0.8
