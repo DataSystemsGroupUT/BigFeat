@@ -17,10 +17,9 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-        self.tracking_ops = []
-        self.tracking_ids = []
-        self._gen_ind = -1
-        self._feat_ind_pos = 1
+        #self.tracking_ops = []
+        #self.tracking_ids = []
+
         
         pass
 
@@ -43,28 +42,31 @@ class BigFeat:
             self.ig_vector /= self.ig_vector.sum()
 
 
+        # for i in range(gen_feats.shape[1]):
+        #     self.op_order[i] = self.gen_feat(X)
+        #     if len(self.op_order[i]) == 3:
+        #         gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
+        #     elif len(self.op_order[i]) == 2:
+        #         gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
+        #     else:
+        #         print('____EROR_____')
+        #     #gen_feats[:,i] = self.gen_feat(X)
+
         for i in range(gen_feats.shape[1]):
-            self.op_order[i] = self.gen_feat(X)
-            if len(self.op_order[i]) == 3:
-                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
-            elif len(self.op_order[i]) == 2:
-                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
-            else:
-                print('____EROR_____')
-            #gen_feats[:,i] = self.gen_feat(X)
-
-
+            dpth  = 3
+            gen_feats[:,i] = self.feat_with_depth(X,dpth,[],[])
 
 
         #print("------------------------------")
-        a = self.feat_with_depth(X,3)
+        ls1 = []
+        ls2 = []
+        a = self.feat_with_depth(X,3,ls1,ls2)
         #self.feat_with_depth(X,2)
         #self.feat_with_depth(X,1)
         #self.feat_with_depth(X,0)
         #b = self.prod_with_detph(X)
-        print(self.tracking_ops)
 
-        b = self.feat_with_depth_gen(X,3)
+        b = self.feat_with_depth_gen(X,3,ls1,ls2)
 
         #print('Gen:')
         #print(a)
@@ -224,21 +226,21 @@ class BigFeat:
     #         return op(feat_1)
 
 
-    def feat_with_depth(self, X, depth):
+    def feat_with_depth(self, X, depth, op_ls, feat_ls):
         if depth == 0:
             feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
-            self.tracking_ids.append(feat_ind)
+            feat_ls.append(feat_ind)
             return X[:,feat_ind]
         depth -= 1
         op = self.rng.choice(self.operators)
         if op in self.binary_operators:
-            feat_1 = self.feat_with_depth(X,depth)
-            feat_2 = self.feat_with_depth(X,depth)
-            self.tracking_ops.append((op,depth))
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            feat_2 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
             return op(feat_1,feat_2)
         elif op in self.unary_operators:
-            feat_1 = self.feat_with_depth(X,depth)
-            self.tracking_ops.append((op,depth))
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
             return op(feat_1)
 
         #return op(X[:,feat_ind_1],X[:,feat_ind_2])
@@ -248,21 +250,21 @@ class BigFeat:
 
 
 
-    def feat_with_depth_gen(self, X, depth):
+    def feat_with_depth_gen(self, X, depth,op_ls, feat_ls):
         if depth == 0:
             #print('aaa')
-            feat_ind = self.tracking_ids.pop()
+            feat_ind = feat_ls.pop()
             return X[:,feat_ind]
         #print('bbbb')
         depth -= 1
-        op = self.tracking_ops.pop()[0]
+        op = op_ls.pop()[0]
         #print(op)
         if op in self.binary_operators:
-            feat_1 = self.feat_with_depth_gen(X,depth)
-            feat_2 = self.feat_with_depth_gen(X,depth)
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            feat_2 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
             return op(feat_2,feat_1)
         elif op in self.unary_operators:
-            feat_1 = self.feat_with_depth_gen(X,depth)
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
             return op(feat_1)
 
 
