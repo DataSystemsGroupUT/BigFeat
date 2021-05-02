@@ -17,13 +17,14 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-        #self.tracking_ops = []
-        #self.tracking_ids = []
+
 
         
         pass
 
     def fit(self,X,y,gen_size=5,random_state=0, feat_imps = False):
+        self.tracking_ops = []
+        self.tracking_ids = []
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
@@ -32,6 +33,7 @@ class BigFeat:
         self.rng = np.random.RandomState(seed=random_state)
         gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
         self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
+        self.feat_depths = np.zeros(gen_feats.shape[1])
 
         self.scaler = MinMaxScaler()
         self.scaler.fit(X)
@@ -54,25 +56,32 @@ class BigFeat:
 
         for i in range(gen_feats.shape[1]):
             dpth  = 3
-            gen_feats[:,i] = self.feat_with_depth(X,dpth,[],[])
+            ops = []
+            ids = []
+            gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)
+            self.feat_depths[i] = dpth
+            self.tracking_ops.append(ops)
+            self.tracking_ids.append(ids)
+        self.tracking_ids = np.array(self.tracking_ids,dtype='object')
+        self.tracking_ops = np.array(self.tracking_ops,dtype='object')
 
 
         #print("------------------------------")
-        ls1 = []
-        ls2 = []
-        a = self.feat_with_depth(X,3,ls1,ls2)
+        #ls1 = []
+        #ls2 = []
+        #a = self.feat_with_depth(X,3,ls1,ls2)
         #self.feat_with_depth(X,2)
         #self.feat_with_depth(X,1)
         #self.feat_with_depth(X,0)
         #b = self.prod_with_detph(X)
 
-        b = self.feat_with_depth_gen(X,3,ls1,ls2)
+        #b = self.feat_with_depth_gen(X,3,ls1,ls2)
 
         #print('Gen:')
         #print(a)
         #print('Prod:')
         #print(b)
-        print(np.allclose(a,b))
+        #print(np.allclose(a,b))
         #print('Dat:')
         #print(self.tracking_ids)
         #print(X)
@@ -83,7 +92,7 @@ class BigFeat:
         #self.op_order = np.hstack((self.op_order,np.arange(self.n_feats)))
         #gen_feats = np.hstack((gen_feats,X))
 
-        if True:
+        if False:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order,to_drop_cor) 
 
@@ -97,7 +106,9 @@ class BigFeat:
         total_feats = np.argsort(imps)
         feat_args = total_feats[-self.n_feats:]
         gen_feats = gen_feats[:,feat_args]
-        self.op_order = self.op_order[feat_args]
+        self.tracking_ids = self.tracking_ids[feat_args]
+        self.tracking_ops = self.tracking_ops[feat_args]
+        self.feat_depths = self.feat_depths[feat_args]
 
         #SEQ SELECTOIN
 
@@ -122,25 +133,41 @@ class BigFeat:
 
         return gen_feats
 
+    # def produce(self,X):
+    #     X = self.scaler.transform(X)
+    #     self.n_rows = X.shape[0]
+    #     gen_feats = np.zeros((self.n_rows, len(self.op_order)))
+
+    #     for i in range(len(self.op_order)):
+    #         if type(self.op_order[i]) == int:
+    #             gen_feats[:,i] = X[:,self.op_order[i]]
+    #         elif len(self.op_order[i]) == 3:
+    #             gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
+    #         elif len(self.op_order[i]) == 2:
+    #             gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
+    #             #print(gen_feats[0,:6])
+
+    #         else:
+    #             print('____EROR_____')
+
+    #     gen_feats = np.hstack((gen_feats,X))
+    #     return gen_feats
+
     def produce(self,X):
         X = self.scaler.transform(X)
         self.n_rows = X.shape[0]
-        gen_feats = np.zeros((self.n_rows, len(self.op_order)))
+        gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
 
-        for i in range(len(self.op_order)):
-            if type(self.op_order[i]) == int:
-                gen_feats[:,i] = X[:,self.op_order[i]]
-            elif len(self.op_order[i]) == 3:
-                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]],X[:,self.op_order[i][2]])
-            elif len(self.op_order[i]) == 2:
-                gen_feats[:,i] = self.op_order[i][0](X[:,self.op_order[i][1]])
-                #print(gen_feats[0,:6])
+        for i in range(gen_feats.shape[1]):
+            dpth = self.feat_depths[i]
+            op_ls = self.tracking_ops[i].copy()
+            id_ls = self.tracking_ids[i].copy()
 
-            else:
-                print('____EROR_____')
-
+            gen_feats[:,i] = self.feat_with_depth_gen(X,dpth,op_ls,id_ls)
         gen_feats = np.hstack((gen_feats,X))
         return gen_feats
+
+
 
     def get_feature_importances(self,X,y,estimator,random_state):
         """Return feature importances by specifeid method """
