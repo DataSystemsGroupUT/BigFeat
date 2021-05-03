@@ -1,11 +1,11 @@
 paths = [
     ('data/banknote.csv','Class'),
-    #('data/phoneme.csv','Class'),
-    #('data/eeg-eye.csv','Class'),
-    #('data/spambase.csv','class'),
-    #('data/valley.csv','Class'),
-    #('data/nomao.csv','Class'),
-    #('data/gina.csv','class'),
+    ('data/phoneme.csv','Class'),
+    ('data/eeg-eye.csv','Class'),
+    ('data/spambase.csv','class'),
+    ('data/valley.csv','Class'),
+    ('data/nomao.csv','Class'),
+    ('data/gina.csv','class'),
 
     #('data/wind.csv','MAL'),
     #('data/ailerons.csv','goal'),

@@ -34,6 +34,9 @@ class BigFeat:
         gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
         self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
         self.feat_depths = np.zeros(gen_feats.shape[1])
+        self.depth_range = np.arange(3)+1
+        self.depth_weights = 1/(2**self.depth_range)
+        self.depth_weights /= self.depth_weights .sum()
 
         self.scaler = MinMaxScaler()
         self.scaler.fit(X)
@@ -55,7 +58,9 @@ class BigFeat:
         #     #gen_feats[:,i] = self.gen_feat(X)
 
         for i in range(gen_feats.shape[1]):
-            dpth  = 3
+            #dpth  = 3
+            dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
+
             ops = []
             ids = []
             gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)

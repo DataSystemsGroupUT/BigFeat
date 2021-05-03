@@ -46,4 +46,4 @@ def run_test(data_path,target_col,runs=10):
 
 if __name__ == "__main__":
     for dataset in paths:
-        run_test(dataset[0],dataset[1],runs= 5)
+        run_test(dataset[0],dataset[1],runs= 10)
