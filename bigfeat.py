@@ -3,9 +3,11 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
 import local_utils
-from sklearn.feature_selection import SequentialFeatureSelector
+#from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
+from sklearn.tree import _tree
+from numba import jit
 
 
 class BigFeat:
@@ -17,13 +19,16 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-    def fit(self,X,y,gen_size=5,random_state=0, feat_imps = False):
+    #@jit
+    def fit(self,X,y,gen_size=5,random_state=0, feat_imps = False, split_feats = None):
         self.tracking_ops = []
         self.tracking_ids = []
         self.gen_steps = []
         self.n_feats = X.shape[1]
         self.n_rows = X.shape[0]
         self.ig_vector = np.ones(self.n_feats)/self.n_feats
+        self.comb_mat = np.ones((self.n_feats,self.n_feats))
+        self.split_vec = np.ones(self.n_feats)
         #Set RNG seed if provided for numpy
         self.rng = np.random.RandomState(seed=random_state)
         gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
@@ -38,8 +43,17 @@ class BigFeat:
         X = self.scaler.transform(X)
 
         if feat_imps:
-            self.ig_vector = self.get_feature_importances(X,y,None,random_state)
+            self.ig_vector, estimators = self.get_feature_importances(X,y,None,random_state)
             self.ig_vector /= self.ig_vector.sum()
+            for tree in estimators:
+                paths = self.get_paths(tree,np.arange(X.shape[1]))
+                self.get_split_feats(paths, self.split_vec)
+                self.split_vec /= self.split_vec.sum()
+            if split_feats == "comb":
+                self.ig_vector = np.multiply(self.ig_vector,self.split_vec)
+                self.ig_vector /= self.ig_vector.sum()
+            elif split_feats == "splits":
+                self.ig_vector = self.split_vec
 
         for i in range(gen_feats.shape[1]):
             #dpth  = 3
@@ -62,7 +76,7 @@ class BigFeat:
 
         #OG SELECTION
 
-        imps = self.get_feature_importances(gen_feats,y,None,random_state)
+        imps, estimators = self.get_feature_importances(gen_feats,y,None,random_state)
         #imps = self.get_weighted_feature_importances(gen_feats,y,None,random_state)
         total_feats = np.argsort(imps)
         feat_args = total_feats[-self.n_feats:]
@@ -88,6 +102,8 @@ class BigFeat:
             self.op_order = np.delete(self.op_order ,to_drop_cor) 
         return gen_feats
 
+
+
     def produce(self,X):
         X = self.scaler.transform(X)
         self.n_rows = X.shape[0]
@@ -100,11 +116,12 @@ class BigFeat:
         gen_feats = np.hstack((gen_feats,X))
         return gen_feats
 
+
     def get_feature_importances(self,X,y,estimator,random_state):
         """Return feature importances by specifeid method """
         estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
         estm.fit(X,y)
-        return estm.feature_importances_
+        return estm.feature_importances_, estm.estimators_
 
     def get_weighted_feature_importances(self,X,y,estimator,random_state):
         """Return feature importances by specifeid method """
@@ -127,7 +144,7 @@ class BigFeat:
         weights = scores/scores.sum()
         return np.average(imps,axis=0, weights=weights)
 
-
+    #@jit(nopython=True)
     def gen_feat(self, X):
         feat_ind_1 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
         feat_ind_2 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
@@ -137,7 +154,7 @@ class BigFeat:
         elif op in self.unary_operators:
             return op,feat_ind_1
 
-
+    #@jit
     def feat_with_depth(self, X, depth, op_ls, feat_ls):
         if depth == 0:
             feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
@@ -172,6 +189,7 @@ class BigFeat:
             feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
             return op(feat_1)
 
+
     def check_corolations(self,feats):
         cor_thresh = 0.8
         corr_matrix = pd.DataFrame(feats).corr().abs()
@@ -181,8 +199,53 @@ class BigFeat:
         feats = pd.DataFrame(feats).drop(to_drop,axis=1)
         return feats.values,to_drop
 
-    def seq_importances(self, X,y, random_state=0):
+
+    def get_paths(self,clf, feature_names):
+        """ Returns every path in the decision tree"""
+
+        tree_ = clf.tree_
+        feature_name = [
+            feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
+            for i in tree_.feature
+        ]
+        path = []
+        path_list = []
+        def recurse(node, depth,path_list):
+            if tree_.feature[node] == _tree.TREE_UNDEFINED:
+                path_list.append(path.copy())
+            else:
+                name = feature_name[node]
+                path.append(name)
+                recurse(tree_.children_left[node], depth + 1,path_list)
+                recurse(tree_.children_right[node], depth + 1,path_list)
+                path.pop()
+        recurse(0, 1,path_list) 
+
+        new_list = []
+        for i in range(len(path_list)):
+            if path_list[i] != path_list[i-1]:
+                new_list.append(path_list[i])
+        return new_list
+
+    def get_combos(self,paths,comb_mat):
+        """ Filles Combination matrix with values """
+
+        for i in range(len(comb_mat)):
+            for pt in paths:
+                if i in pt:
+                    comb_mat[i][pt]+=1
+
+
+    def get_split_feats(self,paths,split_vec):
+        """ Filles Combination matrix with values """
+
+        for i in range(len(split_vec)):
+            for pt in paths:
+                if i in pt:
+                    split_vec[i] += 1
+
+    #def seq_importances(self, X,y, random_state=0):
         #estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
-        sfs = SequentialFeatureSelector(estm, n_features_to_select=self.n_feats)
-        sfs.fit(X, y)
-        return sfs.get_support()
+    #    sfs = SequentialFeatureSelector(estm, n_features_to_select=self.n_feats)
+    #    sfs.fit(X, y)
+    #    return sfs.get_support()

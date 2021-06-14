@@ -1,6 +1,6 @@
 paths = [
     ('data/banknote.csv','Class'),
-    ('data/phoneme.csv','Class'),
+    #('data/phoneme.csv','Class'),
     #('data/eeg-eye.csv','Class'),
     #('data/spambase.csv','class'),
     #('data/valley.csv','Class'),

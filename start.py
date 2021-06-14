@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from paths import paths
 import bigfeat
-
+import time
 
 def load_data(data_path,target_col,random_state=0): 
     df = pd.read_csv(data_path)
@@ -33,7 +33,7 @@ def run_test(data_path,target_col,runs=10):
         X_train, X_test, y_train, y_test = load_data(data_path,target_col,random_state=i)
         og_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
         bf = bigfeat.BigFeat()
-        X_train = bf.fit(X_train, y_train,random_state=i,feat_imps=True)
+        X_train = bf.fit(X_train, y_train,random_state=i,feat_imps=True, split_feats='None')
         X_test = bf.produce(X_test)
         bf_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
     og_rs /= runs
@@ -45,5 +45,11 @@ def run_test(data_path,target_col,runs=10):
 
 
 if __name__ == "__main__":
+
+    #for dataset in paths:
+    #    run_test(dataset[0],dataset[1],runs= 10)
+    start = time.time()
     for dataset in paths:
         run_test(dataset[0],dataset[1],runs= 10)
+    end = time.time()
+    print("Elapsed = %s" % (end - start))
