@@ -8,7 +8,7 @@ setup(
     #author_email = "",
     description = ("Automated feature engineering library"),
     license = "MIT",
-    keywords = "feature engineering", "machine learning", 
+    keywords = "feature engineering", "machine learning", "automl", 
     url = "https://github.com/DataSystemsGroupUT/BigFeat",
     packages=['bigfeat'],
     long_description=("Automated feature engineering library"),
