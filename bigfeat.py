@@ -133,7 +133,6 @@ class BigFeat:
                 rf_importances = clf.feature_importances_
                 estimators = clf.estimators_
                 total_estimators += estimators
-                
                 train_data = lgb.Dataset(sampled_X, label=sampled_y)
                 param = {'num_leaves': 31, 'objective': 'binary', 'verbose':-1}
                 param['metric'] = 'auc'
@@ -143,10 +142,7 @@ class BigFeat:
                 lgb_imps = bst.feature_importance(importance_type='gain')
                 lgb_imps /= lgb_imps.sum()
                 total_importances = (rf_importances + lgb_imps) /2
-
-
             importance_sum +=total_importances
-
         return importance_sum,total_estimators
 
     def get_weighted_feature_importances(self,X,y,estimator,random_state):
