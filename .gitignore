@@ -1,4 +1,6 @@
 BigFeat/data/*
 BigFeat/logs/*
 BigFeat/res/*
+dist/
+bigfeat.egg-info/
 __pycache__/
