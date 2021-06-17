@@ -3,11 +3,10 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
 import local_utils
-#from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import _tree
-from numba import jit
+import lightgbm as lgb
 
 
 class BigFeat:
@@ -19,8 +18,8 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-    #@jit
-    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,estimator='rf',feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+        """ Generated Features using test set """
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators/ self.imp_operators.sum()
         self.gen_steps = []
@@ -45,7 +44,7 @@ class BigFeat:
         self.scaler.fit(X)
         X = self.scaler.transform(X)
         if feat_imps:
-            self.ig_vector, estimators = self.get_feature_importances(X,y,None,random_state)
+            self.ig_vector, estimators = self.get_feature_importances(X,y,estimator,random_state)
             self.ig_vector /= self.ig_vector.sum()
             for tree in estimators:
                 paths = self.get_paths(tree,np.arange(X.shape[1]))
@@ -69,7 +68,7 @@ class BigFeat:
                 self.tracking_ids.append(ids)
             self.tracking_ids = np.array(self.tracking_ids+[[]],dtype='object')[:-1]
             self.tracking_ops = np.array(self.tracking_ops+[[]],dtype='object')[:-1]
-            imps, estimators = self.get_feature_importances(gen_feats,y,None,random_state)
+            imps, estimators = self.get_feature_importances(gen_feats,y,estimator,random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
             gen_feats = gen_feats[:,feat_args]
@@ -86,7 +85,7 @@ class BigFeat:
                         self.imp_operators[i] +=1
             self.operator_weights = self.imp_operators/ self.imp_operators.sum()
         if iterations > 1 and combine_res:
-            imps,estimators = self.get_feature_importances(iters_comb,y,None,random_state)
+            imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
             gen_feats = iters_comb[:,feat_args]
@@ -100,7 +99,8 @@ class BigFeat:
             self.op_order = np.delete(self.op_order ,to_drop_cor) 
         return gen_feats
 
-    def produce(self,X):
+    def transform(self,X):
+        """ Produce features from the fitted BigFeat object """
         X = self.scaler.transform(X)
         self.n_rows = X.shape[0]
         gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
@@ -112,11 +112,42 @@ class BigFeat:
         gen_feats = np.hstack((gen_feats,X))
         return gen_feats
 
-    def get_feature_importances(self,X,y,estimator,random_state):
+    def get_feature_importances(self,X,y,estimator,random_state, sample_count=5, sample_size=3,n_jobs=1):
         """Return feature importances by specifeid method """
-        estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
-        estm.fit(X,y)
-        return estm.feature_importances_, estm.estimators_
+
+        importance_sum = np.zeros(X.shape[1])
+        total_estimators = []
+        for sampled in range(sample_count):
+            sampled_ind = np.random.choice(np.arange(self.n_rows),size=self.n_rows//sample_size,replace=False)
+            sampled_X = X[sampled_ind]
+            sampled_y = np.take(y,sampled_ind)
+            if estimator == "rf":
+                estm = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                estm.fit(sampled_X,sampled_y)
+                total_importances = estm.feature_importances_
+                estimators = estm.estimators_
+                total_estimators += estimators
+            elif estimator == "avg":
+                clf = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                clf.fit(sampled_X, sampled_y)
+                rf_importances = clf.feature_importances_
+                estimators = clf.estimators_
+                total_estimators += estimators
+                
+                train_data = lgb.Dataset(sampled_X, label=sampled_y)
+                param = {'num_leaves': 31, 'objective': 'binary', 'verbose':-1}
+                param['metric'] = 'auc'
+                param = {} 
+                num_round = 2
+                bst = lgb.train(param, train_data, num_round)
+                lgb_imps = bst.feature_importance(importance_type='gain')
+                lgb_imps /= lgb_imps.sum()
+                total_importances = (rf_importances + lgb_imps) /2
+
+
+            importance_sum +=total_importances
+
+        return importance_sum,total_estimators
 
     def get_weighted_feature_importances(self,X,y,estimator,random_state):
         """Return feature importances by specifeid method """
@@ -136,16 +167,8 @@ class BigFeat:
         weights = scores/scores.sum()
         return np.average(imps,axis=0, weights=weights)
 
-    def gen_feat(self, X):
-        feat_ind_1 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
-        feat_ind_2 = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
-        op = self.rng.choice(self.operators)
-        if op in self.binary_operators:
-            return op,feat_ind_1,feat_ind_2
-        elif op in self.unary_operators:
-            return op,feat_ind_1
-
     def feat_with_depth(self, X, depth, op_ls, feat_ls):
+        """ Recusrsivly generate a new features """
         if depth == 0:
             feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
             feat_ls.append(feat_ind)
@@ -163,6 +186,7 @@ class BigFeat:
             return op(feat_1)
 
     def feat_with_depth_gen(self, X, depth,op_ls, feat_ls):
+        """ Reproduce generated features with new data """
         if depth == 0:
             feat_ind = feat_ls.pop()
             return X[:,feat_ind]
@@ -177,6 +201,7 @@ class BigFeat:
             return op(feat_1)
 
     def check_corolations(self,feats):
+        """ Check corroleations among the selected features """
         cor_thresh = 0.8
         corr_matrix = pd.DataFrame(feats).corr().abs()
         mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
