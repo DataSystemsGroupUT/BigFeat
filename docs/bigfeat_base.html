@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>bigfeat.bigfeat_base API documentation</title>
+<meta name="description" content="" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>bigfeat.bigfeat_base</code></h1>
+</header>
+<section id="section-intro">
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import RandomForestClassifier
+import bigfeat.local_utils as local_utils
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.tree import _tree
+import lightgbm as lgb
+
+
+class BigFeat:
+    &#34;&#34;&#34;Base BigFeat Class&#34;&#34;&#34;
+
+    def __init__(self):
+        self.n_jobs = -1
+        self.operators = [np.multiply, np.add, np.subtract, np.abs,np.square]
+        self.binary_operators = [np.multiply, np.add, np.subtract]
+        self.unary_operators = [np.abs,np.square,local_utils.original_feat]
+
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,estimator=&#39;rf&#39;,feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+        &#34;&#34;&#34; Generated Features using test set &#34;&#34;&#34;
+        self.imp_operators = np.ones(len(self.operators))
+        self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+        self.gen_steps = []
+        self.n_feats = X.shape[1]
+        self.n_rows = X.shape[0]
+        self.ig_vector = np.ones(self.n_feats)/self.n_feats
+        self.comb_mat = np.ones((self.n_feats,self.n_feats))
+        self.split_vec = np.ones(self.n_feats)
+        #Set RNG seed if provided for numpy
+        self.rng = np.random.RandomState(seed=random_state)
+        gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
+        iters_comb = np.zeros((self.n_rows, self.n_feats*iterations))
+        depths_comb = np.zeros(self.n_feats*iterations)
+        ids_comb = np.zeros(self.n_feats*iterations, dtype=object)
+        ops_comb = np.zeros(self.n_feats*iterations, dtype=object)
+        self.op_order = np.zeros(self.n_feats*gen_size, dtype=&#39;object&#39;)
+        self.feat_depths = np.zeros(gen_feats.shape[1])
+        self.depth_range = np.arange(3)+1
+        self.depth_weights = 1/(2**self.depth_range)
+        self.depth_weights /= self.depth_weights .sum()
+        self.scaler = MinMaxScaler()
+        self.scaler.fit(X)
+        X = self.scaler.transform(X)
+        if feat_imps:
+            self.ig_vector, estimators = self.get_feature_importances(X,y,estimator,random_state)
+            self.ig_vector /= self.ig_vector.sum()
+            for tree in estimators:
+                paths = self.get_paths(tree,np.arange(X.shape[1]))
+                self.get_split_feats(paths, self.split_vec)
+                self.split_vec /= self.split_vec.sum()
+            if split_feats == &#34;comb&#34;:
+                self.ig_vector = np.multiply(self.ig_vector,self.split_vec)
+                self.ig_vector /= self.ig_vector.sum()
+            elif split_feats == &#34;splits&#34;:
+                self.ig_vector = self.split_vec
+        for iteration in range(iterations):
+            self.tracking_ops = []
+            self.tracking_ids = []
+            for i in range(gen_feats.shape[1]):
+                dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
+                ops = []
+                ids = []
+                gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)
+                self.feat_depths[i] = dpth
+                self.tracking_ops.append(ops)
+                self.tracking_ids.append(ids)
+            self.tracking_ids = np.array(self.tracking_ids+[[]],dtype=&#39;object&#39;)[:-1]
+            self.tracking_ops = np.array(self.tracking_ops+[[]],dtype=&#39;object&#39;)[:-1]
+            imps, estimators = self.get_feature_importances(gen_feats,y,estimator,random_state)
+            total_feats = np.argsort(imps)
+            feat_args = total_feats[-self.n_feats:]
+            gen_feats = gen_feats[:,feat_args]
+            self.tracking_ids = self.tracking_ids[feat_args]
+            self.tracking_ops = self.tracking_ops[feat_args]
+            self.feat_depths = self.feat_depths[feat_args]
+            depths_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.feat_depths
+            ids_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ids
+            ops_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ops
+            iters_comb[:,iteration*self.n_feats:(iteration+1)*self.n_feats] = gen_feats
+            for i, op in enumerate(self.operators):
+                for feat in self.tracking_ops:
+                    if op in feat:
+                        self.imp_operators[i] +=1
+            self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+        if iterations &gt; 1 and combine_res:
+            imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
+            total_feats = np.argsort(imps)
+            feat_args = total_feats[-self.n_feats:]
+            gen_feats = iters_comb[:,feat_args]
+            self.tracking_ids = ids_comb[feat_args]
+            self.tracking_ops = ops_comb[feat_args]
+            self.feat_depths = depths_comb[feat_args]
+
+        gen_feats = np.hstack((gen_feats,X))
+        if check_corr:
+            gen_feats, to_drop_cor = self.check_corolations(gen_feats)
+            self.op_order = np.delete(self.op_order ,to_drop_cor) 
+        return gen_feats
+
+    def transform(self,X):
+        &#34;&#34;&#34; Produce features from the fitted BigFeat object &#34;&#34;&#34;
+        X = self.scaler.transform(X)
+        self.n_rows = X.shape[0]
+        gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
+        for i in range(gen_feats.shape[1]):
+            dpth = self.feat_depths[i]
+            op_ls = self.tracking_ops[i].copy()
+            id_ls = self.tracking_ids[i].copy()
+            gen_feats[:,i] = self.feat_with_depth_gen(X,dpth,op_ls,id_ls)
+        gen_feats = np.hstack((gen_feats,X))
+        return gen_feats
+
+    def get_feature_importances(self,X,y,estimator,random_state, sample_count=5, sample_size=3,n_jobs=1):
+        &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+
+        importance_sum = np.zeros(X.shape[1])
+        total_estimators = []
+        for sampled in range(sample_count):
+            sampled_ind = np.random.choice(np.arange(self.n_rows),size=self.n_rows//sample_size,replace=False)
+            sampled_X = X[sampled_ind]
+            sampled_y = np.take(y,sampled_ind)
+            if estimator == &#34;rf&#34;:
+                estm = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                estm.fit(sampled_X,sampled_y)
+                total_importances = estm.feature_importances_
+                estimators = estm.estimators_
+                total_estimators += estimators
+            elif estimator == &#34;avg&#34;:
+                clf = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                clf.fit(sampled_X, sampled_y)
+                rf_importances = clf.feature_importances_
+                estimators = clf.estimators_
+                total_estimators += estimators
+                train_data = lgb.Dataset(sampled_X, label=sampled_y)
+                param = {&#39;num_leaves&#39;: 31, &#39;objective&#39;: &#39;binary&#39;, &#39;verbose&#39;:-1}
+                param[&#39;metric&#39;] = &#39;auc&#39;
+                param = {} 
+                num_round = 2
+                bst = lgb.train(param, train_data, num_round)
+                lgb_imps = bst.feature_importance(importance_type=&#39;gain&#39;)
+                lgb_imps /= lgb_imps.sum()
+                total_importances = (rf_importances + lgb_imps) /2
+            importance_sum +=total_importances
+        return importance_sum,total_estimators
+
+    def get_weighted_feature_importances(self,X,y,estimator,random_state):
+        &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=random_state)
+        estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
+        estm.fit(X_train,y_train)
+        ests = estm.estimators_
+        model = estm
+        imps = np.zeros((len(model.estimators_),X.shape[1]))
+        scores = np.zeros(len(model.estimators_))
+        for i,each in enumerate(model.estimators_):
+            y_probas_train = each.predict_proba(X_test)[:, 1]
+            roc_train = roc_auc_score(y_test, y_probas_train)
+            imps[i]=each.feature_importances_
+            scores[i] = roc_train
+        weights = scores/scores.sum()
+        return np.average(imps,axis=0, weights=weights)
+
+    def feat_with_depth(self, X, depth, op_ls, feat_ls):
+        &#34;&#34;&#34; Recusrsivly generate a new features &#34;&#34;&#34;
+        if depth == 0:
+            feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
+            feat_ls.append(feat_ind)
+            return X[:,feat_ind]
+        depth -= 1
+        op = self.rng.choice(self.operators, p=self.operator_weights)
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            feat_2 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
+            return op(feat_1,feat_2)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
+            return op(feat_1)
+
+    def feat_with_depth_gen(self, X, depth,op_ls, feat_ls):
+        &#34;&#34;&#34; Reproduce generated features with new data &#34;&#34;&#34;
+        if depth == 0:
+            feat_ind = feat_ls.pop()
+            return X[:,feat_ind]
+        depth -= 1
+        op = op_ls.pop()[0]
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            feat_2 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            return op(feat_2,feat_1)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            return op(feat_1)
+
+    def check_corolations(self,feats):
+        &#34;&#34;&#34; Check corroleations among the selected features &#34;&#34;&#34;
+        cor_thresh = 0.8
+        corr_matrix = pd.DataFrame(feats).corr().abs()
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        tri_df = corr_matrix.mask(mask)
+        to_drop = [c for c in tri_df.columns if any(tri_df[c] &gt; cor_thresh)]
+        feats = pd.DataFrame(feats).drop(to_drop,axis=1)
+        return feats.values,to_drop
+
+    def get_paths(self,clf, feature_names):
+        &#34;&#34;&#34; Returns every path in the decision tree&#34;&#34;&#34;
+        tree_ = clf.tree_
+        feature_name = [
+            feature_names[i] if i != _tree.TREE_UNDEFINED else &#34;undefined!&#34;
+            for i in tree_.feature
+        ]
+        path = []
+        path_list = []
+        def recurse(node, depth,path_list):
+            if tree_.feature[node] == _tree.TREE_UNDEFINED:
+                path_list.append(path.copy())
+            else:
+                name = feature_name[node]
+                path.append(name)
+                recurse(tree_.children_left[node], depth + 1,path_list)
+                recurse(tree_.children_right[node], depth + 1,path_list)
+                path.pop()
+        recurse(0, 1,path_list) 
+
+        new_list = []
+        for i in range(len(path_list)):
+            if path_list[i] != path_list[i-1]:
+                new_list.append(path_list[i])
+        return new_list
+
+    def get_combos(self,paths,comb_mat):
+        &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+        for i in range(len(comb_mat)):
+            for pt in paths:
+                if i in pt:
+                    comb_mat[i][pt]+=1
+
+    def get_split_feats(self,paths,split_vec):
+        &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+
+        for i in range(len(split_vec)):
+            for pt in paths:
+                if i in pt:
+                    split_vec[i] += 1</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="bigfeat.bigfeat_base.BigFeat"><code class="flex name class">
+<span>class <span class="ident">BigFeat</span></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Base BigFeat Class</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class BigFeat:
+    &#34;&#34;&#34;Base BigFeat Class&#34;&#34;&#34;
+
+    def __init__(self):
+        self.n_jobs = -1
+        self.operators = [np.multiply, np.add, np.subtract, np.abs,np.square]
+        self.binary_operators = [np.multiply, np.add, np.subtract]
+        self.unary_operators = [np.abs,np.square,local_utils.original_feat]
+
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,estimator=&#39;rf&#39;,feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+        &#34;&#34;&#34; Generated Features using test set &#34;&#34;&#34;
+        self.imp_operators = np.ones(len(self.operators))
+        self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+        self.gen_steps = []
+        self.n_feats = X.shape[1]
+        self.n_rows = X.shape[0]
+        self.ig_vector = np.ones(self.n_feats)/self.n_feats
+        self.comb_mat = np.ones((self.n_feats,self.n_feats))
+        self.split_vec = np.ones(self.n_feats)
+        #Set RNG seed if provided for numpy
+        self.rng = np.random.RandomState(seed=random_state)
+        gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
+        iters_comb = np.zeros((self.n_rows, self.n_feats*iterations))
+        depths_comb = np.zeros(self.n_feats*iterations)
+        ids_comb = np.zeros(self.n_feats*iterations, dtype=object)
+        ops_comb = np.zeros(self.n_feats*iterations, dtype=object)
+        self.op_order = np.zeros(self.n_feats*gen_size, dtype=&#39;object&#39;)
+        self.feat_depths = np.zeros(gen_feats.shape[1])
+        self.depth_range = np.arange(3)+1
+        self.depth_weights = 1/(2**self.depth_range)
+        self.depth_weights /= self.depth_weights .sum()
+        self.scaler = MinMaxScaler()
+        self.scaler.fit(X)
+        X = self.scaler.transform(X)
+        if feat_imps:
+            self.ig_vector, estimators = self.get_feature_importances(X,y,estimator,random_state)
+            self.ig_vector /= self.ig_vector.sum()
+            for tree in estimators:
+                paths = self.get_paths(tree,np.arange(X.shape[1]))
+                self.get_split_feats(paths, self.split_vec)
+                self.split_vec /= self.split_vec.sum()
+            if split_feats == &#34;comb&#34;:
+                self.ig_vector = np.multiply(self.ig_vector,self.split_vec)
+                self.ig_vector /= self.ig_vector.sum()
+            elif split_feats == &#34;splits&#34;:
+                self.ig_vector = self.split_vec
+        for iteration in range(iterations):
+            self.tracking_ops = []
+            self.tracking_ids = []
+            for i in range(gen_feats.shape[1]):
+                dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
+                ops = []
+                ids = []
+                gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)
+                self.feat_depths[i] = dpth
+                self.tracking_ops.append(ops)
+                self.tracking_ids.append(ids)
+            self.tracking_ids = np.array(self.tracking_ids+[[]],dtype=&#39;object&#39;)[:-1]
+            self.tracking_ops = np.array(self.tracking_ops+[[]],dtype=&#39;object&#39;)[:-1]
+            imps, estimators = self.get_feature_importances(gen_feats,y,estimator,random_state)
+            total_feats = np.argsort(imps)
+            feat_args = total_feats[-self.n_feats:]
+            gen_feats = gen_feats[:,feat_args]
+            self.tracking_ids = self.tracking_ids[feat_args]
+            self.tracking_ops = self.tracking_ops[feat_args]
+            self.feat_depths = self.feat_depths[feat_args]
+            depths_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.feat_depths
+            ids_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ids
+            ops_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ops
+            iters_comb[:,iteration*self.n_feats:(iteration+1)*self.n_feats] = gen_feats
+            for i, op in enumerate(self.operators):
+                for feat in self.tracking_ops:
+                    if op in feat:
+                        self.imp_operators[i] +=1
+            self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+        if iterations &gt; 1 and combine_res:
+            imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
+            total_feats = np.argsort(imps)
+            feat_args = total_feats[-self.n_feats:]
+            gen_feats = iters_comb[:,feat_args]
+            self.tracking_ids = ids_comb[feat_args]
+            self.tracking_ops = ops_comb[feat_args]
+            self.feat_depths = depths_comb[feat_args]
+
+        gen_feats = np.hstack((gen_feats,X))
+        if check_corr:
+            gen_feats, to_drop_cor = self.check_corolations(gen_feats)
+            self.op_order = np.delete(self.op_order ,to_drop_cor) 
+        return gen_feats
+
+    def transform(self,X):
+        &#34;&#34;&#34; Produce features from the fitted BigFeat object &#34;&#34;&#34;
+        X = self.scaler.transform(X)
+        self.n_rows = X.shape[0]
+        gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
+        for i in range(gen_feats.shape[1]):
+            dpth = self.feat_depths[i]
+            op_ls = self.tracking_ops[i].copy()
+            id_ls = self.tracking_ids[i].copy()
+            gen_feats[:,i] = self.feat_with_depth_gen(X,dpth,op_ls,id_ls)
+        gen_feats = np.hstack((gen_feats,X))
+        return gen_feats
+
+    def get_feature_importances(self,X,y,estimator,random_state, sample_count=5, sample_size=3,n_jobs=1):
+        &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+
+        importance_sum = np.zeros(X.shape[1])
+        total_estimators = []
+        for sampled in range(sample_count):
+            sampled_ind = np.random.choice(np.arange(self.n_rows),size=self.n_rows//sample_size,replace=False)
+            sampled_X = X[sampled_ind]
+            sampled_y = np.take(y,sampled_ind)
+            if estimator == &#34;rf&#34;:
+                estm = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                estm.fit(sampled_X,sampled_y)
+                total_importances = estm.feature_importances_
+                estimators = estm.estimators_
+                total_estimators += estimators
+            elif estimator == &#34;avg&#34;:
+                clf = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+                clf.fit(sampled_X, sampled_y)
+                rf_importances = clf.feature_importances_
+                estimators = clf.estimators_
+                total_estimators += estimators
+                train_data = lgb.Dataset(sampled_X, label=sampled_y)
+                param = {&#39;num_leaves&#39;: 31, &#39;objective&#39;: &#39;binary&#39;, &#39;verbose&#39;:-1}
+                param[&#39;metric&#39;] = &#39;auc&#39;
+                param = {} 
+                num_round = 2
+                bst = lgb.train(param, train_data, num_round)
+                lgb_imps = bst.feature_importance(importance_type=&#39;gain&#39;)
+                lgb_imps /= lgb_imps.sum()
+                total_importances = (rf_importances + lgb_imps) /2
+            importance_sum +=total_importances
+        return importance_sum,total_estimators
+
+    def get_weighted_feature_importances(self,X,y,estimator,random_state):
+        &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=random_state)
+        estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
+        estm.fit(X_train,y_train)
+        ests = estm.estimators_
+        model = estm
+        imps = np.zeros((len(model.estimators_),X.shape[1]))
+        scores = np.zeros(len(model.estimators_))
+        for i,each in enumerate(model.estimators_):
+            y_probas_train = each.predict_proba(X_test)[:, 1]
+            roc_train = roc_auc_score(y_test, y_probas_train)
+            imps[i]=each.feature_importances_
+            scores[i] = roc_train
+        weights = scores/scores.sum()
+        return np.average(imps,axis=0, weights=weights)
+
+    def feat_with_depth(self, X, depth, op_ls, feat_ls):
+        &#34;&#34;&#34; Recusrsivly generate a new features &#34;&#34;&#34;
+        if depth == 0:
+            feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
+            feat_ls.append(feat_ind)
+            return X[:,feat_ind]
+        depth -= 1
+        op = self.rng.choice(self.operators, p=self.operator_weights)
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            feat_2 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
+            return op(feat_1,feat_2)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+            op_ls.append((op,depth))
+            return op(feat_1)
+
+    def feat_with_depth_gen(self, X, depth,op_ls, feat_ls):
+        &#34;&#34;&#34; Reproduce generated features with new data &#34;&#34;&#34;
+        if depth == 0:
+            feat_ind = feat_ls.pop()
+            return X[:,feat_ind]
+        depth -= 1
+        op = op_ls.pop()[0]
+        if op in self.binary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            feat_2 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            return op(feat_2,feat_1)
+        elif op in self.unary_operators:
+            feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+            return op(feat_1)
+
+    def check_corolations(self,feats):
+        &#34;&#34;&#34; Check corroleations among the selected features &#34;&#34;&#34;
+        cor_thresh = 0.8
+        corr_matrix = pd.DataFrame(feats).corr().abs()
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        tri_df = corr_matrix.mask(mask)
+        to_drop = [c for c in tri_df.columns if any(tri_df[c] &gt; cor_thresh)]
+        feats = pd.DataFrame(feats).drop(to_drop,axis=1)
+        return feats.values,to_drop
+
+    def get_paths(self,clf, feature_names):
+        &#34;&#34;&#34; Returns every path in the decision tree&#34;&#34;&#34;
+        tree_ = clf.tree_
+        feature_name = [
+            feature_names[i] if i != _tree.TREE_UNDEFINED else &#34;undefined!&#34;
+            for i in tree_.feature
+        ]
+        path = []
+        path_list = []
+        def recurse(node, depth,path_list):
+            if tree_.feature[node] == _tree.TREE_UNDEFINED:
+                path_list.append(path.copy())
+            else:
+                name = feature_name[node]
+                path.append(name)
+                recurse(tree_.children_left[node], depth + 1,path_list)
+                recurse(tree_.children_right[node], depth + 1,path_list)
+                path.pop()
+        recurse(0, 1,path_list) 
+
+        new_list = []
+        for i in range(len(path_list)):
+            if path_list[i] != path_list[i-1]:
+                new_list.append(path_list[i])
+        return new_list
+
+    def get_combos(self,paths,comb_mat):
+        &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+        for i in range(len(comb_mat)):
+            for pt in paths:
+                if i in pt:
+                    comb_mat[i][pt]+=1
+
+    def get_split_feats(self,paths,split_vec):
+        &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+
+        for i in range(len(split_vec)):
+            for pt in paths:
+                if i in pt:
+                    split_vec[i] += 1</code></pre>
+</details>
+<h3>Methods</h3>
+<dl>
+<dt id="bigfeat.bigfeat_base.BigFeat.check_corolations"><code class="name flex">
+<span>def <span class="ident">check_corolations</span></span>(<span>self, feats)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check corroleations among the selected features</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_corolations(self,feats):
+    &#34;&#34;&#34; Check corroleations among the selected features &#34;&#34;&#34;
+    cor_thresh = 0.8
+    corr_matrix = pd.DataFrame(feats).corr().abs()
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+    tri_df = corr_matrix.mask(mask)
+    to_drop = [c for c in tri_df.columns if any(tri_df[c] &gt; cor_thresh)]
+    feats = pd.DataFrame(feats).drop(to_drop,axis=1)
+    return feats.values,to_drop</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.feat_with_depth"><code class="name flex">
+<span>def <span class="ident">feat_with_depth</span></span>(<span>self, X, depth, op_ls, feat_ls)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Recusrsivly generate a new features</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def feat_with_depth(self, X, depth, op_ls, feat_ls):
+    &#34;&#34;&#34; Recusrsivly generate a new features &#34;&#34;&#34;
+    if depth == 0:
+        feat_ind = self.rng.choice(np.arange(len(self.ig_vector )),p=self.ig_vector)
+        feat_ls.append(feat_ind)
+        return X[:,feat_ind]
+    depth -= 1
+    op = self.rng.choice(self.operators, p=self.operator_weights)
+    if op in self.binary_operators:
+        feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+        feat_2 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+        op_ls.append((op,depth))
+        return op(feat_1,feat_2)
+    elif op in self.unary_operators:
+        feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
+        op_ls.append((op,depth))
+        return op(feat_1)</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.feat_with_depth_gen"><code class="name flex">
+<span>def <span class="ident">feat_with_depth_gen</span></span>(<span>self, X, depth, op_ls, feat_ls)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Reproduce generated features with new data</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def feat_with_depth_gen(self, X, depth,op_ls, feat_ls):
+    &#34;&#34;&#34; Reproduce generated features with new data &#34;&#34;&#34;
+    if depth == 0:
+        feat_ind = feat_ls.pop()
+        return X[:,feat_ind]
+    depth -= 1
+    op = op_ls.pop()[0]
+    if op in self.binary_operators:
+        feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+        feat_2 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+        return op(feat_2,feat_1)
+    elif op in self.unary_operators:
+        feat_1 = self.feat_with_depth_gen(X,depth, op_ls, feat_ls)
+        return op(feat_1)</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.fit"><code class="name flex">
+<span>def <span class="ident">fit</span></span>(<span>self, X, y, gen_size=5, random_state=0, iterations=1, estimator='rf', feat_imps=False, split_feats=None, check_corr=False, combine_res=True)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Generated Features using test set</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fit(self,X,y,gen_size=5,random_state=0, iterations=1,estimator=&#39;rf&#39;,feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+    &#34;&#34;&#34; Generated Features using test set &#34;&#34;&#34;
+    self.imp_operators = np.ones(len(self.operators))
+    self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+    self.gen_steps = []
+    self.n_feats = X.shape[1]
+    self.n_rows = X.shape[0]
+    self.ig_vector = np.ones(self.n_feats)/self.n_feats
+    self.comb_mat = np.ones((self.n_feats,self.n_feats))
+    self.split_vec = np.ones(self.n_feats)
+    #Set RNG seed if provided for numpy
+    self.rng = np.random.RandomState(seed=random_state)
+    gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
+    iters_comb = np.zeros((self.n_rows, self.n_feats*iterations))
+    depths_comb = np.zeros(self.n_feats*iterations)
+    ids_comb = np.zeros(self.n_feats*iterations, dtype=object)
+    ops_comb = np.zeros(self.n_feats*iterations, dtype=object)
+    self.op_order = np.zeros(self.n_feats*gen_size, dtype=&#39;object&#39;)
+    self.feat_depths = np.zeros(gen_feats.shape[1])
+    self.depth_range = np.arange(3)+1
+    self.depth_weights = 1/(2**self.depth_range)
+    self.depth_weights /= self.depth_weights .sum()
+    self.scaler = MinMaxScaler()
+    self.scaler.fit(X)
+    X = self.scaler.transform(X)
+    if feat_imps:
+        self.ig_vector, estimators = self.get_feature_importances(X,y,estimator,random_state)
+        self.ig_vector /= self.ig_vector.sum()
+        for tree in estimators:
+            paths = self.get_paths(tree,np.arange(X.shape[1]))
+            self.get_split_feats(paths, self.split_vec)
+            self.split_vec /= self.split_vec.sum()
+        if split_feats == &#34;comb&#34;:
+            self.ig_vector = np.multiply(self.ig_vector,self.split_vec)
+            self.ig_vector /= self.ig_vector.sum()
+        elif split_feats == &#34;splits&#34;:
+            self.ig_vector = self.split_vec
+    for iteration in range(iterations):
+        self.tracking_ops = []
+        self.tracking_ids = []
+        for i in range(gen_feats.shape[1]):
+            dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
+            ops = []
+            ids = []
+            gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)
+            self.feat_depths[i] = dpth
+            self.tracking_ops.append(ops)
+            self.tracking_ids.append(ids)
+        self.tracking_ids = np.array(self.tracking_ids+[[]],dtype=&#39;object&#39;)[:-1]
+        self.tracking_ops = np.array(self.tracking_ops+[[]],dtype=&#39;object&#39;)[:-1]
+        imps, estimators = self.get_feature_importances(gen_feats,y,estimator,random_state)
+        total_feats = np.argsort(imps)
+        feat_args = total_feats[-self.n_feats:]
+        gen_feats = gen_feats[:,feat_args]
+        self.tracking_ids = self.tracking_ids[feat_args]
+        self.tracking_ops = self.tracking_ops[feat_args]
+        self.feat_depths = self.feat_depths[feat_args]
+        depths_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.feat_depths
+        ids_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ids
+        ops_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ops
+        iters_comb[:,iteration*self.n_feats:(iteration+1)*self.n_feats] = gen_feats
+        for i, op in enumerate(self.operators):
+            for feat in self.tracking_ops:
+                if op in feat:
+                    self.imp_operators[i] +=1
+        self.operator_weights = self.imp_operators/ self.imp_operators.sum()
+    if iterations &gt; 1 and combine_res:
+        imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
+        total_feats = np.argsort(imps)
+        feat_args = total_feats[-self.n_feats:]
+        gen_feats = iters_comb[:,feat_args]
+        self.tracking_ids = ids_comb[feat_args]
+        self.tracking_ops = ops_comb[feat_args]
+        self.feat_depths = depths_comb[feat_args]
+
+    gen_feats = np.hstack((gen_feats,X))
+    if check_corr:
+        gen_feats, to_drop_cor = self.check_corolations(gen_feats)
+        self.op_order = np.delete(self.op_order ,to_drop_cor) 
+    return gen_feats</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.get_combos"><code class="name flex">
+<span>def <span class="ident">get_combos</span></span>(<span>self, paths, comb_mat)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Filles Combination matrix with values</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_combos(self,paths,comb_mat):
+    &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+    for i in range(len(comb_mat)):
+        for pt in paths:
+            if i in pt:
+                comb_mat[i][pt]+=1</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.get_feature_importances"><code class="name flex">
+<span>def <span class="ident">get_feature_importances</span></span>(<span>self, X, y, estimator, random_state, sample_count=5, sample_size=3, n_jobs=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return feature importances by specifeid method</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_feature_importances(self,X,y,estimator,random_state, sample_count=5, sample_size=3,n_jobs=1):
+    &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+
+    importance_sum = np.zeros(X.shape[1])
+    total_estimators = []
+    for sampled in range(sample_count):
+        sampled_ind = np.random.choice(np.arange(self.n_rows),size=self.n_rows//sample_size,replace=False)
+        sampled_X = X[sampled_ind]
+        sampled_y = np.take(y,sampled_ind)
+        if estimator == &#34;rf&#34;:
+            estm = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+            estm.fit(sampled_X,sampled_y)
+            total_importances = estm.feature_importances_
+            estimators = estm.estimators_
+            total_estimators += estimators
+        elif estimator == &#34;avg&#34;:
+            clf = RandomForestClassifier(random_state=random_state,n_jobs=n_jobs)
+            clf.fit(sampled_X, sampled_y)
+            rf_importances = clf.feature_importances_
+            estimators = clf.estimators_
+            total_estimators += estimators
+            train_data = lgb.Dataset(sampled_X, label=sampled_y)
+            param = {&#39;num_leaves&#39;: 31, &#39;objective&#39;: &#39;binary&#39;, &#39;verbose&#39;:-1}
+            param[&#39;metric&#39;] = &#39;auc&#39;
+            param = {} 
+            num_round = 2
+            bst = lgb.train(param, train_data, num_round)
+            lgb_imps = bst.feature_importance(importance_type=&#39;gain&#39;)
+            lgb_imps /= lgb_imps.sum()
+            total_importances = (rf_importances + lgb_imps) /2
+        importance_sum +=total_importances
+    return importance_sum,total_estimators</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.get_paths"><code class="name flex">
+<span>def <span class="ident">get_paths</span></span>(<span>self, clf, feature_names)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Returns every path in the decision tree</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_paths(self,clf, feature_names):
+    &#34;&#34;&#34; Returns every path in the decision tree&#34;&#34;&#34;
+    tree_ = clf.tree_
+    feature_name = [
+        feature_names[i] if i != _tree.TREE_UNDEFINED else &#34;undefined!&#34;
+        for i in tree_.feature
+    ]
+    path = []
+    path_list = []
+    def recurse(node, depth,path_list):
+        if tree_.feature[node] == _tree.TREE_UNDEFINED:
+            path_list.append(path.copy())
+        else:
+            name = feature_name[node]
+            path.append(name)
+            recurse(tree_.children_left[node], depth + 1,path_list)
+            recurse(tree_.children_right[node], depth + 1,path_list)
+            path.pop()
+    recurse(0, 1,path_list) 
+
+    new_list = []
+    for i in range(len(path_list)):
+        if path_list[i] != path_list[i-1]:
+            new_list.append(path_list[i])
+    return new_list</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.get_split_feats"><code class="name flex">
+<span>def <span class="ident">get_split_feats</span></span>(<span>self, paths, split_vec)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Filles Combination matrix with values</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_split_feats(self,paths,split_vec):
+    &#34;&#34;&#34; Filles Combination matrix with values &#34;&#34;&#34;
+
+    for i in range(len(split_vec)):
+        for pt in paths:
+            if i in pt:
+                split_vec[i] += 1</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.get_weighted_feature_importances"><code class="name flex">
+<span>def <span class="ident">get_weighted_feature_importances</span></span>(<span>self, X, y, estimator, random_state)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return feature importances by specifeid method</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_weighted_feature_importances(self,X,y,estimator,random_state):
+    &#34;&#34;&#34;Return feature importances by specifeid method &#34;&#34;&#34;
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=random_state)
+    estm = RandomForestClassifier(random_state=random_state,n_jobs=self.n_jobs)
+    estm.fit(X_train,y_train)
+    ests = estm.estimators_
+    model = estm
+    imps = np.zeros((len(model.estimators_),X.shape[1]))
+    scores = np.zeros(len(model.estimators_))
+    for i,each in enumerate(model.estimators_):
+        y_probas_train = each.predict_proba(X_test)[:, 1]
+        roc_train = roc_auc_score(y_test, y_probas_train)
+        imps[i]=each.feature_importances_
+        scores[i] = roc_train
+    weights = scores/scores.sum()
+    return np.average(imps,axis=0, weights=weights)</code></pre>
+</details>
+</dd>
+<dt id="bigfeat.bigfeat_base.BigFeat.transform"><code class="name flex">
+<span>def <span class="ident">transform</span></span>(<span>self, X)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Produce features from the fitted BigFeat object</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self,X):
+    &#34;&#34;&#34; Produce features from the fitted BigFeat object &#34;&#34;&#34;
+    X = self.scaler.transform(X)
+    self.n_rows = X.shape[0]
+    gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
+    for i in range(gen_feats.shape[1]):
+        dpth = self.feat_depths[i]
+        op_ls = self.tracking_ops[i].copy()
+        id_ls = self.tracking_ids[i].copy()
+        gen_feats[:,i] = self.feat_with_depth_gen(X,dpth,op_ls,id_ls)
+    gen_feats = np.hstack((gen_feats,X))
+    return gen_feats</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="bigfeat.bigfeat_base.BigFeat" href="#bigfeat.bigfeat_base.BigFeat">BigFeat</a></code></h4>
+<ul class="">
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.check_corolations" href="#bigfeat.bigfeat_base.BigFeat.check_corolations">check_corolations</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.feat_with_depth" href="#bigfeat.bigfeat_base.BigFeat.feat_with_depth">feat_with_depth</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.feat_with_depth_gen" href="#bigfeat.bigfeat_base.BigFeat.feat_with_depth_gen">feat_with_depth_gen</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.fit" href="#bigfeat.bigfeat_base.BigFeat.fit">fit</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.get_combos" href="#bigfeat.bigfeat_base.BigFeat.get_combos">get_combos</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.get_feature_importances" href="#bigfeat.bigfeat_base.BigFeat.get_feature_importances">get_feature_importances</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.get_paths" href="#bigfeat.bigfeat_base.BigFeat.get_paths">get_paths</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.get_split_feats" href="#bigfeat.bigfeat_base.BigFeat.get_split_feats">get_split_feats</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.get_weighted_feature_importances" href="#bigfeat.bigfeat_base.BigFeat.get_weighted_feature_importances">get_weighted_feature_importances</a></code></li>
+<li><code><a title="bigfeat.bigfeat_base.BigFeat.transform" href="#bigfeat.bigfeat_base.BigFeat.transform">transform</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>
