@@ -33,7 +33,7 @@ def run_test(data_path,target_col,runs=10):
         X_train, X_test, y_train, y_test = load_data(data_path,target_col,random_state=i)
         og_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
         bf = bigfeat.BigFeat()
-        X_train = bf.fit(X_train, y_train,random_state=i,feat_imps=True, split_feats='None')
+        X_train = bf.fit(X_train, y_train,random_state=i,feat_imps=True, split_feats='None', iterations=1)
         X_test = bf.produce(X_test)
         bf_rs += run_rf(X_train, X_test, y_train, y_test,random_state=i)
     og_rs /= runs

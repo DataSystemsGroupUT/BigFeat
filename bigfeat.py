@@ -20,7 +20,7 @@ class BigFeat:
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
     #@jit
-    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,feat_imps = False, split_feats = None):
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators/ self.imp_operators.sum()
         self.gen_steps = []
@@ -36,17 +36,14 @@ class BigFeat:
         depths_comb = np.zeros(self.n_feats*iterations)
         ids_comb = np.zeros(self.n_feats*iterations, dtype=object)
         ops_comb = np.zeros(self.n_feats*iterations, dtype=object)
-
         self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
         self.feat_depths = np.zeros(gen_feats.shape[1])
         self.depth_range = np.arange(3)+1
         self.depth_weights = 1/(2**self.depth_range)
         self.depth_weights /= self.depth_weights .sum()
-
         self.scaler = MinMaxScaler()
         self.scaler.fit(X)
         X = self.scaler.transform(X)
-
         if feat_imps:
             self.ig_vector, estimators = self.get_feature_importances(X,y,None,random_state)
             self.ig_vector /= self.ig_vector.sum()
@@ -59,7 +56,6 @@ class BigFeat:
                 self.ig_vector /= self.ig_vector.sum()
             elif split_feats == "splits":
                 self.ig_vector = self.split_vec
-
         for iteration in range(iterations):
             self.tracking_ops = []
             self.tracking_ids = []
@@ -71,16 +67,8 @@ class BigFeat:
                 self.feat_depths[i] = dpth
                 self.tracking_ops.append(ops)
                 self.tracking_ids.append(ids)
-            self.tracking_ids = np.array(self.tracking_ids,dtype='object')
-            self.tracking_ops = np.array(self.tracking_ops,dtype='object')
-
-
-            if False:
-                gen_feats, to_drop_cor = self.check_corolations(gen_feats)
-                self.op_order = np.delete(self.op_order,to_drop_cor) 
-
-
-
+            self.tracking_ids = np.array(self.tracking_ids+[[]],dtype='object')[:-1]
+            self.tracking_ops = np.array(self.tracking_ops+[[]],dtype='object')[:-1]
             imps, estimators = self.get_feature_importances(gen_feats,y,None,random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
@@ -88,23 +76,17 @@ class BigFeat:
             self.tracking_ids = self.tracking_ids[feat_args]
             self.tracking_ops = self.tracking_ops[feat_args]
             self.feat_depths = self.feat_depths[feat_args]
-
             depths_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.feat_depths
             ids_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ids
             ops_comb[iteration*self.n_feats:(iteration+1)*self.n_feats] = self.tracking_ops
             iters_comb[:,iteration*self.n_feats:(iteration+1)*self.n_feats] = gen_feats
-
             for i, op in enumerate(self.operators):
                 for feat in self.tracking_ops:
                     if op in feat:
-                        #curr_imp_operators[i] += 1
                         self.imp_operators[i] +=1
             self.operator_weights = self.imp_operators/ self.imp_operators.sum()
-
-
-        if iterations > 1:
-            imps = self.get_feature_importances(iters_comb,y,None,random_state)
-            #imps = self.get_weighted_feature_importances(gen_feats,y,None,random_state)
+        if iterations > 1 and combine_res:
+            imps,estimators = self.get_feature_importances(iters_comb,y,None,random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
             gen_feats = iters_comb[:,feat_args]
@@ -112,10 +94,8 @@ class BigFeat:
             self.tracking_ops = ops_comb[feat_args]
             self.feat_depths = depths_comb[feat_args]
 
-
         gen_feats = np.hstack((gen_feats,X))
-
-        if False:
+        if check_corr:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.op_order = np.delete(self.op_order ,to_drop_cor) 
         return gen_feats
@@ -171,7 +151,7 @@ class BigFeat:
             feat_ls.append(feat_ind)
             return X[:,feat_ind]
         depth -= 1
-        op = self.rng.choice(self.operators)
+        op = self.rng.choice(self.operators, p=self.operator_weights)
         if op in self.binary_operators:
             feat_1 = self.feat_with_depth(X,depth,op_ls, feat_ls)
             feat_2 = self.feat_with_depth(X,depth,op_ls, feat_ls)
