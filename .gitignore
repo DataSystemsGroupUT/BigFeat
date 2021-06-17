@@ -1,4 +1,4 @@
-data/*
-logs/*
-res/*
+BigFeat/data/*
+BigFeat/logs/*
+BigFeat/res/*
 __pycache__/
