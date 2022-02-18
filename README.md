@@ -8,7 +8,7 @@ Bigfeat takes the original input features and returns a collection of base and e
 
 # Installation:
   - **pip** : pip install bigfeat
-  - **local installation** python setup.py
+  - **local installation**: python setup.py
 
 # Requirement:
   - 'pandas',
