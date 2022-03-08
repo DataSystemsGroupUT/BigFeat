@@ -18,7 +18,7 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-    def fit(self,X,y,gen_size=5,random_state=0, iterations=1,estimator='rf',feat_imps = False, split_feats = None, check_corr= False, combine_res = True):
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=3,estimator='rf',feat_imps = True, split_feats = None, check_corr= True, combine_res = True):
         """ Generated Features using test set """
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators/ self.imp_operators.sum()
