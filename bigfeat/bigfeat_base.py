@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 import bigfeat.local_utils as local_utils
 from sklearn.metrics import roc_auc_score
@@ -18,7 +18,7 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-    def fit(self,X,y,gen_size=5,random_state=0, iterations=3,estimator='rf',feat_imps = True, split_feats = None, check_corr= True, combine_res = True):
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=5,estimator='avg',feat_imps = True, split_feats = None, check_corr= True, combine_res = True):
         """ Generated Features using test set """
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators/ self.imp_operators.sum()
@@ -49,7 +49,8 @@ class BigFeat:
             for tree in estimators:
                 paths = self.get_paths(tree,np.arange(X.shape[1]))
                 self.get_split_feats(paths, self.split_vec)
-                self.split_vec /= self.split_vec.sum()
+            self.split_vec /= self.split_vec.sum()
+            # self.split_vec = StandardScaler().fit_transform(self.split_vec.reshape(1, -1), {'var_':5})
             if split_feats == "comb":
                 self.ig_vector = np.multiply(self.ig_vector,self.split_vec)
                 self.ig_vector /= self.ig_vector.sum()
@@ -58,11 +59,12 @@ class BigFeat:
         for iteration in range(iterations):
             self.tracking_ops = []
             self.tracking_ids = []
+            gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
             for i in range(gen_feats.shape[1]):
                 dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
                 ops = []
                 ids = []
-                gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids)
+                gen_feats[:,i] = self.feat_with_depth(X,dpth,ops,ids) # ops and ids are updated
                 self.feat_depths[i] = dpth
                 self.tracking_ops.append(ops)
                 self.tracking_ids.append(ids)
@@ -81,8 +83,9 @@ class BigFeat:
             iters_comb[:,iteration*self.n_feats:(iteration+1)*self.n_feats] = gen_feats
             for i, op in enumerate(self.operators):
                 for feat in self.tracking_ops:
-                    if op in feat:
-                        self.imp_operators[i] +=1
+                    for feat_op in feat:
+                        if op == feat_op[0]:
+                            self.imp_operators[i] +=1
             self.operator_weights = self.imp_operators/ self.imp_operators.sum()
         if iterations > 1 and combine_res:
             imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
@@ -112,7 +115,7 @@ class BigFeat:
         gen_feats = np.hstack((gen_feats,X))
         return gen_feats
 
-    def get_feature_importances(self,X,y,estimator,random_state, sample_count=5, sample_size=3,n_jobs=1):
+    def get_feature_importances(self,X,y,estimator,random_state, sample_count=1, sample_size=3,n_jobs=1):
         """Return feature importances by specifeid method """
 
         importance_sum = np.zeros(X.shape[1])
