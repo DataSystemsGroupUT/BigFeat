@@ -35,7 +35,6 @@ class BigFeat:
         depths_comb = np.zeros(self.n_feats*iterations)
         ids_comb = np.zeros(self.n_feats*iterations, dtype=object)
         ops_comb = np.zeros(self.n_feats*iterations, dtype=object)
-        self.op_order = np.zeros(self.n_feats*gen_size, dtype='object')
         self.feat_depths = np.zeros(gen_feats.shape[1])
         self.depth_range = np.arange(3)+1
         self.depth_weights = 1/(2**self.depth_range)
@@ -60,6 +59,7 @@ class BigFeat:
             self.tracking_ops = []
             self.tracking_ids = []
             gen_feats = np.zeros((self.n_rows, self.n_feats*gen_size))
+            self.feat_depths = np.zeros(gen_feats.shape[1])
             for i in range(gen_feats.shape[1]):
                 dpth = self.rng.choice(self.depth_range,p=self.depth_weights)
                 ops = []
@@ -96,10 +96,12 @@ class BigFeat:
             self.tracking_ops = ops_comb[feat_args]
             self.feat_depths = depths_comb[feat_args]
 
-        gen_feats = np.hstack((gen_feats,X))
         if check_corr:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
-            self.op_order = np.delete(self.op_order ,to_drop_cor) 
+            self.tracking_ids = np.delete(self.tracking_ids ,to_drop_cor)
+            self.tracking_ops = np.delete(self.tracking_ops ,to_drop_cor)
+            self.feat_depths = np.delete(self.feat_depths ,to_drop_cor)
+        gen_feats = np.hstack((gen_feats,X))
         return gen_feats
 
     def transform(self,X):
@@ -203,9 +205,18 @@ class BigFeat:
         """ Check corroleations among the selected features """
         cor_thresh = 0.8
         corr_matrix = pd.DataFrame(feats).corr().abs()
-        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        mask = np.tril(np.ones_like(corr_matrix, dtype=bool))
         tri_df = corr_matrix.mask(mask)
         to_drop = [c for c in tri_df.columns if any(tri_df[c] > cor_thresh)]
+        # remove the feature with lower importance if corr > cor_thresh
+        # to_drop = []
+        # for c in tri_df.columns:
+        #     if any(corr_matrix[c] > cor_thresh):
+        #         for c_, cor_val in enumerate(corr_matrix[c].values):
+        #             if cor_val > cor_thresh and c != c_:
+        #                 if self.ig_vector_gen[c_] < self.ig_vector_gen[c] and c_ not in to_drop:
+        #                     to_drop.append(c_)
+
         feats = pd.DataFrame(feats).drop(to_drop,axis=1)
         return feats.values,to_drop
 
