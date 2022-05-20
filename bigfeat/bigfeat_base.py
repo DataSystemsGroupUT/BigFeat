@@ -7,6 +7,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import _tree
 import lightgbm as lgb
+from sklearn.feature_selection import SelectKBest
 
 
 class BigFeat:
@@ -18,8 +19,9 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs,np.square,local_utils.original_feat]
 
-    def fit(self,X,y,gen_size=5,random_state=0, iterations=5,estimator='avg',feat_imps = True, split_feats = None, check_corr= True, combine_res = True):
+    def fit(self,X,y,gen_size=5,random_state=0, iterations=5,estimator='avg',feat_imps = True, split_feats = None, check_corr= True, selection = 'stability', combine_res = True):
         """ Generated Features using test set """
+        self.selection = selection
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators/ self.imp_operators.sum()
         self.gen_steps = []
@@ -87,7 +89,7 @@ class BigFeat:
                         if op == feat_op[0]:
                             self.imp_operators[i] +=1
             self.operator_weights = self.imp_operators/ self.imp_operators.sum()
-        if iterations > 1 and combine_res:
+        if selection == 'stability' and iterations > 1 and combine_res:
             imps,estimators = self.get_feature_importances(iters_comb,y,estimator,random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
@@ -96,18 +98,23 @@ class BigFeat:
             self.tracking_ops = ops_comb[feat_args]
             self.feat_depths = depths_comb[feat_args]
 
-        if check_corr:
+        if selection == 'stability' and check_corr:
             gen_feats, to_drop_cor = self.check_corolations(gen_feats)
             self.tracking_ids = np.delete(self.tracking_ids ,to_drop_cor)
             self.tracking_ops = np.delete(self.tracking_ops ,to_drop_cor)
             self.feat_depths = np.delete(self.feat_depths ,to_drop_cor)
         gen_feats = np.hstack((gen_feats,X))
+
+        if selection == 'fAnova':
+            self.fAnova_best = SelectKBest(k=self.n_feats)
+            gen_feats = self.fAnova_best.fit_transform(gen_feats, y)
+
         return gen_feats
 
     def transform(self,X):
         """ Produce features from the fitted BigFeat object """
         X = self.scaler.transform(X)
-        self.n_rows = X.shape[0]
+        self.n_rows = X.shape[0]  
         gen_feats = np.zeros((self.n_rows, len(self.tracking_ids)))
         for i in range(gen_feats.shape[1]):
             dpth = self.feat_depths[i]
@@ -115,6 +122,8 @@ class BigFeat:
             id_ls = self.tracking_ids[i].copy()
             gen_feats[:,i] = self.feat_with_depth_gen(X,dpth,op_ls,id_ls)
         gen_feats = np.hstack((gen_feats,X))
+        if self.selection == 'fAnova':
+            gen_feats = self.fAnova_best.transform(gen_feats)
         return gen_feats
 
     def get_feature_importances(self,X,y,estimator,random_state, sample_count=1, sample_size=3,n_jobs=1):
