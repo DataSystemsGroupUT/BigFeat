@@ -16,4 +16,4 @@ Bigfeat takes the original input features and returns a collection of base and e
   - 'scikit-learn',
   - 'lightgbm'
   
-  ## Paper is under submission to EDBT research conference.
+  ## Paper is under submission to IEEE BigData research conference.
