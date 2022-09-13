@@ -24,14 +24,9 @@ Bigfeat takes the original input features and returns a collection of base and e
 import pandas as pd
 import numpy as np
 from numpy.random import RandomState
-# from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier
-# from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
-# from sklearn.tree import _tree
-# from sklearn.preprocessing import MinMaxScaler
-# from sklearn.metrics.cluster import normalized_mutual_info_score
 
 import bigfeat.bigfeat_base as bigfeat
 import pandas as pd
