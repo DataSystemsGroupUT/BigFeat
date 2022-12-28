@@ -7,7 +7,13 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import _tree
 import lightgbm as lgb
+from lightgbm.sklearn import LGBMClassifier
 from sklearn.feature_selection import SelectKBest
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import f1_score, make_scorer
+
 
 
 class BigFeat:
@@ -125,6 +131,24 @@ class BigFeat:
         if self.selection == 'fAnova':
             gen_feats = self.fAnova_best.transform(gen_feats)
         return gen_feats
+
+    def select_estimator(self, X, y, estimators_names = ['dt', 'lr']):
+        estimators_dic = {
+            'dt': DecisionTreeClassifier(),
+            'lr': LogisticRegression(),
+            'rf': RandomForestClassifier(n_jobs=self.n_jobs),
+            'lgb': LGBMClassifier()
+        }
+        models_score = {}
+
+        for estimator in estimators_names:
+            model = estimators_dic[estimator]
+            f1 = make_scorer(f1_score)
+            models_score[estimator] = cross_val_score(model, X, y, cv=3, scoring=f1).mean()
+        best_estimator = max(models_score, key=models_score.get)
+        best_model = estimators_dic[best_estimator]
+        best_model.fit(X, y)
+        return best_model
 
     def get_feature_importances(self,X,y,estimator,random_state, sample_count=1, sample_size=3,n_jobs=1):
         """Return feature importances by specifeid method """
