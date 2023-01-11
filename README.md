@@ -7,8 +7,8 @@ BigFeat employs a dynamic feature generation and selection mechanism that constr
 Bigfeat takes the original input features and returns a collection of base and engineered features expected to improve the predictive performance.
 
 # Installation:
-  - **pip** : pip install bigfeat
-  - **local installation**: python setup.py
+  - **pip** : !pip install bigfeat
+  - **local installation**: !pip install BigFeat/.
 
 # Requirement:
   - 'pandas',
