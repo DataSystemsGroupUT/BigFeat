@@ -84,4 +84,15 @@ for each in datasets:
 
   
   
-  ## Paper is under submission to IEEE BigData research conference.
+  ## Cite us:
+  
+  ```bib
+  @inproceedings{eldeeb2022bigfeat,
+    title={BigFeat: Scalable and Interpretable Automated Feature Engineering Framework},
+    author={Eldeeb, Hassan and Amashukeli, Shota and ElShawi, Radwa},
+    booktitle={2022 IEEE International Conference on Big Data (Big Data)},
+    pages={515--524},
+    year={2022},
+    organization={IEEE}
+}
+  ```
