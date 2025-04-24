@@ -4,3 +4,4 @@ BigFeat/res/*
 dist/
 bigfeat.egg-info/
 __pycache__/
+.venv
