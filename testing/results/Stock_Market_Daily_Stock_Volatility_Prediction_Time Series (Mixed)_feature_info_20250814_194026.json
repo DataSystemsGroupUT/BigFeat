@@ -1,0 +1,69 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_multiply_square",
+    "Gen_Feat_1_absolute",
+    "Gen_Feat_2_add",
+    "Gen_Feat_3_subtract_seasonal_decompose",
+    "Gen_Feat_4_diff_feature_rolling_mean",
+    "Gen_Feat_5_rolling_max",
+    "Gen_Feat_6_absolute",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "multiply -> square(High, High)",
+    "absolute(MACD)",
+    "add(Volume_MA, Volume_MA)",
+    "subtract -> seasonal_decompose -> subtract -> absolute(Volume_MA, Returns, High)",
+    "diff_feature -> rolling_mean -> subtract(MACD, MACD)",
+    "rolling_max(DaysFromStart)",
+    "absolute(DaysFromStart)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 7,
+  "n_original_features": 12,
+  "total_features": 19,
+  "ts_ops_count": 4,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "3D",
+    "7D",
+    "14D",
+    "21D",
+    "30D",
+    "60D",
+    "90D"
+  ],
+  "lag_periods": [
+    "1D",
+    "3D",
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "time_step": "D"
+}

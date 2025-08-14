@@ -1,0 +1,49 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_add",
+    "Gen_Feat_1_absolute",
+    "Original_Customers",
+    "Original_AvgTransaction",
+    "Original_FootTraffic",
+    "Original_HasPromo",
+    "Original_IsWeekend",
+    "Original_Temperature",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_WeekOfYear"
+  ],
+  "feature_descriptions": [
+    "add(FootTraffic, AvgTransaction)",
+    "absolute(Customers)",
+    "Original: Customers",
+    "Original: AvgTransaction",
+    "Original: FootTraffic",
+    "Original: HasPromo",
+    "Original: IsWeekend",
+    "Original: Temperature",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: WeekOfYear"
+  ],
+  "n_generated_features": 2,
+  "n_original_features": 10,
+  "total_features": 12,
+  "ts_ops_count": 0,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Store"
+  ],
+  "window_sizes": [
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "lag_periods": [
+    "1D",
+    "7D",
+    "14D"
+  ],
+  "time_step": "D"
+}

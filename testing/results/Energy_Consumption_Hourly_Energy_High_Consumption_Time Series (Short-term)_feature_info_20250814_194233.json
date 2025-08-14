@@ -1,0 +1,54 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_seasonal_decompose",
+    "Gen_Feat_1_subtract",
+    "Gen_Feat_2_subtract",
+    "Gen_Feat_3_rolling_std_rolling_max",
+    "Original_Temperature",
+    "Original_Hour",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_IsWeekend",
+    "Original_IsHoliday",
+    "Original_IsBusinessHour",
+    "Original_HourlyPattern",
+    "Original_WeatherEffect"
+  ],
+  "feature_descriptions": [
+    "seasonal_decompose(Temperature)",
+    "subtract(IsWeekend, HourlyPattern)",
+    "subtract(Temperature, IsWeekend)",
+    "rolling_std -> rolling_max -> month_mean -> seasonal_decompose -> subtract -> multiply(IsBusinessHour, HourlyPattern, Temperature)",
+    "Original: Temperature",
+    "Original: Hour",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: IsWeekend",
+    "Original: IsHoliday",
+    "Original: IsBusinessHour",
+    "Original: HourlyPattern",
+    "Original: WeatherEffect"
+  ],
+  "n_generated_features": 4,
+  "n_original_features": 10,
+  "total_features": 14,
+  "ts_ops_count": 5,
+  "datetime_col": "DateTime",
+  "groupby_cols": [],
+  "window_sizes": [
+    "1H",
+    "3H",
+    "6H",
+    "12H",
+    "1D"
+  ],
+  "lag_periods": [
+    "1H",
+    "3H",
+    "6H",
+    "12H"
+  ],
+  "time_step": "H"
+}

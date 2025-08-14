@@ -1,0 +1,58 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_multiply_multiply",
+    "Gen_Feat_1_month_mean_absolute",
+    "Gen_Feat_2_multiply",
+    "Gen_Feat_3_rolling_std",
+    "Gen_Feat_4_multiply",
+    "Gen_Feat_5_multiply",
+    "Gen_Feat_6_multiply",
+    "Gen_Feat_7_multiply",
+    "Original_Customers",
+    "Original_AvgTransaction",
+    "Original_FootTraffic",
+    "Original_HasPromo",
+    "Original_IsWeekend",
+    "Original_Temperature",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_WeekOfYear"
+  ],
+  "feature_descriptions": [
+    "multiply -> multiply -> multiply(FootTraffic, AvgTransaction, WeekOfYear, Customers)",
+    "month_mean -> absolute -> add(DayOfWeek, Customers)",
+    "multiply(AvgTransaction, Customers)",
+    "rolling_std(Customers)",
+    "multiply(HasPromo, FootTraffic)",
+    "multiply(Customers, FootTraffic)",
+    "multiply(DayOfWeek, DayOfWeek)",
+    "multiply(WeekOfYear, WeekOfYear)",
+    "Original: Customers",
+    "Original: AvgTransaction",
+    "Original: FootTraffic",
+    "Original: HasPromo",
+    "Original: IsWeekend",
+    "Original: Temperature",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: WeekOfYear"
+  ],
+  "n_generated_features": 8,
+  "n_original_features": 10,
+  "total_features": 18,
+  "ts_ops_count": 2,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Store"
+  ],
+  "window_sizes": [
+    "1Y"
+  ],
+  "lag_periods": [
+    "90D",
+    "180D"
+  ],
+  "time_step": "D"
+}
