@@ -1,0 +1,56 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_absolute",
+    "Gen_Feat_1_add",
+    "Gen_Feat_2_multiply_lag_feature",
+    "Original_Customers",
+    "Original_AvgTransaction",
+    "Original_FootTraffic",
+    "Original_HasPromo",
+    "Original_IsWeekend",
+    "Original_Temperature",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_WeekOfYear"
+  ],
+  "feature_descriptions": [
+    "absolute(Customers)",
+    "add(AvgTransaction, Customers)",
+    "multiply -> lag_feature -> subtract(Customers, AvgTransaction, FootTraffic)",
+    "Original: Customers",
+    "Original: AvgTransaction",
+    "Original: FootTraffic",
+    "Original: HasPromo",
+    "Original: IsWeekend",
+    "Original: Temperature",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: WeekOfYear"
+  ],
+  "n_generated_features": 3,
+  "n_original_features": 10,
+  "total_features": 13,
+  "ts_ops_count": 1,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Store"
+  ],
+  "window_sizes": [
+    "7D",
+    "14D",
+    "30D",
+    "60D",
+    "90D",
+    "180D"
+  ],
+  "lag_periods": [
+    "1D",
+    "7D",
+    "14D",
+    "30D",
+    "60D"
+  ],
+  "time_step": "D"
+}
