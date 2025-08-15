@@ -1,0 +1,69 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_square_square",
+    "Gen_Feat_1_rolling_sum_absolute",
+    "Gen_Feat_2_square",
+    "Gen_Feat_3_rolling_sum_rolling_mean",
+    "Gen_Feat_4_trend_feature",
+    "Gen_Feat_5_rolling_sum_square",
+    "Gen_Feat_6_add",
+    "Gen_Feat_7_rolling_max_rolling_mean",
+    "Gen_Feat_8_subtract_square",
+    "Gen_Feat_9_subtract",
+    "Gen_Feat_10_rolling_std",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "square -> square(Open)",
+    "rolling_sum -> absolute(DaysFromStart)",
+    "square(DaysFromStart)",
+    "rolling_sum -> rolling_mean(RSI)",
+    "trend_feature(Month)",
+    "rolling_sum -> square -> subtract(MACD, MACD)",
+    "add(Volume_MA, DaysFromStart)",
+    "rolling_max -> rolling_mean -> seasonal_decompose(Volume_MA)",
+    "subtract -> square(High, MACD)",
+    "subtract(DaysFromStart, Month)",
+    "rolling_std(Month)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 11,
+  "n_original_features": 12,
+  "total_features": 23,
+  "ts_ops_count": 9,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "6M",
+    "1Y"
+  ],
+  "lag_periods": [
+    "60D",
+    "90D"
+  ],
+  "time_step": "D"
+}
