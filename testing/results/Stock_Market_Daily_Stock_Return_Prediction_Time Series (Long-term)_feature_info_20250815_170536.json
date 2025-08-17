@@ -1,0 +1,73 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_trend_feature_diff_feature",
+    "Gen_Feat_1_add",
+    "Gen_Feat_2_multiply_trend_feature",
+    "Gen_Feat_3_trend_feature",
+    "Gen_Feat_4_multiply_trend_feature",
+    "Gen_Feat_5_seasonal_decompose",
+    "Gen_Feat_6_trend_feature",
+    "Gen_Feat_7_ewm_seasonal_decompose",
+    "Gen_Feat_8_square_square",
+    "Gen_Feat_9_rolling_median",
+    "Gen_Feat_10_square_rolling_max",
+    "Gen_Feat_11_subtract",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_Volatility",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "trend_feature -> diff_feature -> seasonal_decompose(RSI)",
+    "add(Volume, Low)",
+    "multiply -> trend_feature(Volume, DaysFromStart)",
+    "trend_feature(RSI)",
+    "multiply -> trend_feature(Volatility, Returns)",
+    "seasonal_decompose(Returns)",
+    "trend_feature(HL_Pct)",
+    "ewm -> seasonal_decompose(HL_Pct)",
+    "square -> square -> multiply -> absolute(HL_Pct, RSI)",
+    "rolling_median(Returns)",
+    "square -> rolling_max -> multiply(Volume_MA, MACD)",
+    "subtract(Volume_MA, Open)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: Volatility",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 12,
+  "n_original_features": 13,
+  "total_features": 25,
+  "ts_ops_count": 12,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "6M",
+    "1Y"
+  ],
+  "lag_periods": [
+    "60D",
+    "90D"
+  ],
+  "time_step": "D"
+}

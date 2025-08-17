@@ -5,3 +5,5 @@ dist/
 bigfeat.egg-info/
 __pycache__/
 venv
+.venv
+.idea

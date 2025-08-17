@@ -204,8 +204,8 @@ class BigFeat:
             df[self.datetime_col] = pd.to_datetime(df[self.datetime_col])
 
         # Sort by datetime and groupby columns for proper time series order
-        sort_cols = [self.datetime_col] if self.datetime_col in df.columns else []
-        sort_cols.extend([col for col in self.groupby_cols if col in df.columns])
+        sort_cols= [col for col in self.groupby_cols if col in df.columns]
+        sort_cols.extend([self.datetime_col] if self.datetime_col in df.columns else [])
 
         if sort_cols:
             df = df.sort_values(sort_cols).reset_index(drop=True)
@@ -769,7 +769,8 @@ class BigFeat:
 
         # Original initialization - unchanged
         self.selection = selection
-        self.imp_operators = np.ones(len(self.operators))
+        self.imp_operators = np.ones(5)
+        self.imp_operators. += np.ones(len(self.feature_columns) - 5) * 2
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
         self.gen_steps = []
         self.n_feats = X_features.shape[1]

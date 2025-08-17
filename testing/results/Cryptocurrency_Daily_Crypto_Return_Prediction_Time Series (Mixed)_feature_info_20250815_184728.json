@@ -1,0 +1,73 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_rolling_sum",
+    "Gen_Feat_1_absolute",
+    "Gen_Feat_2_absolute_rolling_max",
+    "Gen_Feat_3_add_trend_feature",
+    "Gen_Feat_4_rolling_mean_rolling_mean",
+    "Gen_Feat_5_rolling_mean_rolling_sum",
+    "Gen_Feat_6_add_rolling_mean",
+    "Gen_Feat_7_original_feat",
+    "Gen_Feat_8_rolling_max_trend_feature",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_Volatility",
+    "Original_Price_Range",
+    "Original_SMA_7",
+    "Original_SMA_30",
+    "Original_Price_Position",
+    "Original_DayOfWeek",
+    "Original_Month"
+  ],
+  "feature_descriptions": [
+    "rolling_sum(Returns)",
+    "absolute(Low)",
+    "absolute -> rolling_max(Price_Range)",
+    "add -> trend_feature -> original_feat(Price_Position, Low)",
+    "rolling_mean -> rolling_mean(Returns)",
+    "rolling_mean -> rolling_sum(Volatility)",
+    "add -> rolling_mean(Volatility, Volatility)",
+    "original_feat(Price_Position)",
+    "rolling_max -> trend_feature(Low)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: Volatility",
+    "Original: Price_Range",
+    "Original: SMA_7",
+    "Original: SMA_30",
+    "Original: Price_Position",
+    "Original: DayOfWeek",
+    "Original: Month"
+  ],
+  "n_generated_features": 9,
+  "n_original_features": 12,
+  "total_features": 21,
+  "ts_ops_count": 10,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "3D",
+    "7D",
+    "14D",
+    "21D",
+    "30D",
+    "60D",
+    "90D"
+  ],
+  "lag_periods": [
+    "1D",
+    "3D",
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "time_step": "D"
+}

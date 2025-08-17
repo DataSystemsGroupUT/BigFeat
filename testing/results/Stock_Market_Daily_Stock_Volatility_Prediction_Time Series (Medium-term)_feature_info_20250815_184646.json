@@ -1,0 +1,60 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_original_feat",
+    "Gen_Feat_1_rolling_median",
+    "Gen_Feat_2_original_feat",
+    "Gen_Feat_3_add",
+    "Gen_Feat_4_absolute",
+    "Gen_Feat_5_rolling_std_rolling_min",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "original_feat(Volume_MA)",
+    "rolling_median(DaysFromStart)",
+    "original_feat(DaysFromStart)",
+    "add(Volume_MA, Low)",
+    "absolute(MACD)",
+    "rolling_std -> rolling_min -> subtract -> rolling_mean(DaysFromStart, Month)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 6,
+  "n_original_features": 12,
+  "total_features": 18,
+  "ts_ops_count": 4,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "30D",
+    "60D",
+    "90D"
+  ],
+  "lag_periods": [
+    "14D",
+    "30D"
+  ],
+  "time_step": "D"
+}

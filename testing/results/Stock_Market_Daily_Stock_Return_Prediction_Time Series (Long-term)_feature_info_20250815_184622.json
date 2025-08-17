@@ -1,0 +1,73 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_seasonal_decompose_original_feat",
+    "Gen_Feat_1_trend_feature_seasonal_decompose",
+    "Gen_Feat_2_rolling_min_rolling_median",
+    "Gen_Feat_3_multiply",
+    "Gen_Feat_4_add",
+    "Gen_Feat_5_absolute",
+    "Gen_Feat_6_rolling_max_trend_feature",
+    "Gen_Feat_7_rolling_sum",
+    "Gen_Feat_8_rolling_median",
+    "Gen_Feat_9_trend_feature",
+    "Gen_Feat_10_seasonal_decompose_rolling_mean",
+    "Gen_Feat_11_rolling_sum",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_Volatility",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "seasonal_decompose -> original_feat -> absolute -> rolling_max -> subtract -> multiply(MACD, Volatility, MACD)",
+    "trend_feature -> seasonal_decompose(DaysFromStart)",
+    "rolling_min -> rolling_median -> rolling_median -> rolling_mean -> multiply(Returns, MACD)",
+    "multiply(DaysFromStart, Volume)",
+    "add(Open, MACD)",
+    "absolute(HL_Pct)",
+    "rolling_max -> trend_feature(Returns)",
+    "rolling_sum(Returns)",
+    "rolling_median(Volatility)",
+    "trend_feature(MACD)",
+    "seasonal_decompose -> rolling_mean(DaysFromStart)",
+    "rolling_sum(Volatility)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: Volatility",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 12,
+  "n_original_features": 13,
+  "total_features": 25,
+  "ts_ops_count": 16,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "6M",
+    "1Y"
+  ],
+  "lag_periods": [
+    "60D",
+    "90D"
+  ],
+  "time_step": "D"
+}

@@ -1,0 +1,72 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_subtract_absolute",
+    "Gen_Feat_1_seasonal_decompose_add",
+    "Gen_Feat_2_subtract_seasonal_decompose",
+    "Gen_Feat_3_multiply",
+    "Gen_Feat_4_absolute",
+    "Gen_Feat_5_seasonal_decompose",
+    "Gen_Feat_6_add",
+    "Gen_Feat_7_add_rolling_std",
+    "Gen_Feat_8_rolling_std_rolling_sum",
+    "Gen_Feat_9_absolute_rolling_std",
+    "Gen_Feat_10_rolling_std_trend_feature",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_Volatility",
+    "Original_HL_Pct",
+    "Original_Volume_MA",
+    "Original_RSI",
+    "Original_MACD",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_DaysFromStart"
+  ],
+  "feature_descriptions": [
+    "subtract -> absolute(High, Volatility)",
+    "seasonal_decompose -> add -> subtract -> rolling_sum -> rolling_std -> multiply(MACD, Volume, Returns, Returns)",
+    "subtract -> seasonal_decompose -> absolute(RSI, MACD)",
+    "multiply(Volume, Volume)",
+    "absolute(RSI)",
+    "seasonal_decompose(HL_Pct)",
+    "add(Returns, Returns)",
+    "add -> rolling_std -> rolling_mean(Volume_MA, Open)",
+    "rolling_std -> rolling_sum(Returns)",
+    "absolute -> rolling_std(Volume)",
+    "rolling_std -> trend_feature(HL_Pct)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: Volatility",
+    "Original: HL_Pct",
+    "Original: Volume_MA",
+    "Original: RSI",
+    "Original: MACD",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: DaysFromStart"
+  ],
+  "n_generated_features": 11,
+  "n_original_features": 13,
+  "total_features": 24,
+  "ts_ops_count": 12,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "30D",
+    "60D",
+    "90D"
+  ],
+  "lag_periods": [
+    "14D",
+    "30D"
+  ],
+  "time_step": "D"
+}

@@ -1,0 +1,414 @@
+{
+  "Stock_Market_Daily": {
+    "Stock_Direction_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": 0.43666666666666665,
+        "n_features": 25,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.47,
+        "n_features": 26,
+        "ts_ops_count": 21,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.4633333333333333,
+        "n_features": 24,
+        "ts_ops_count": 13,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.4666666666666667,
+        "n_features": 24,
+        "ts_ops_count": 12,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.49666666666666665,
+        "n_features": 25,
+        "ts_ops_count": 7,
+        "model": "RandomForestClassifier"
+      }
+    },
+    "Stock_Return_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": -0.5735093683968151,
+        "n_features": 22,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 0.021519690247261018,
+        "rmse": 0.027829623418847746
+      },
+      "Time Series (Short-term)": {
+        "score": -0.5596002374077915,
+        "n_features": 25,
+        "ts_ops_count": 9,
+        "model": "RandomForestRegressor",
+        "mae": 0.021259946467906646,
+        "rmse": 0.027706349574943424
+      },
+      "Time Series (Medium-term)": {
+        "score": -2.798425340869382,
+        "n_features": 26,
+        "ts_ops_count": 10,
+        "model": "RandomForestRegressor",
+        "mae": 0.038470617701668174,
+        "rmse": 0.043238882431074536
+      },
+      "Time Series (Long-term)": {
+        "score": -3.033816696977949,
+        "n_features": 26,
+        "ts_ops_count": 17,
+        "model": "RandomForestRegressor",
+        "mae": 0.03699703825378146,
+        "rmse": 0.044558518500576655
+      },
+      "Time Series (Mixed)": {
+        "score": -0.6863363868461347,
+        "n_features": 24,
+        "ts_ops_count": 8,
+        "model": "RandomForestRegressor",
+        "mae": 0.022815497152943263,
+        "rmse": 0.028810100197790796
+      }
+    },
+    "Stock_Volatility_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": 0.6933333333333334,
+        "n_features": 18,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.7033333333333334,
+        "n_features": 17,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.49,
+        "n_features": 18,
+        "ts_ops_count": 5,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.5933333333333334,
+        "n_features": 21,
+        "ts_ops_count": 7,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.41,
+        "n_features": 23,
+        "ts_ops_count": 7,
+        "model": "RandomForestClassifier"
+      }
+    }
+  },
+  "Cryptocurrency_Daily": {
+    "Crypto_Direction_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": 0.5486111111111112,
+        "n_features": 21,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.4097222222222222,
+        "n_features": 22,
+        "ts_ops_count": 10,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.5347222222222222,
+        "n_features": 22,
+        "ts_ops_count": 5,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.5069444444444444,
+        "n_features": 23,
+        "ts_ops_count": 8,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.4652777777777778,
+        "n_features": 23,
+        "ts_ops_count": 12,
+        "model": "DecisionTreeClassifier"
+      }
+    },
+    "Crypto_Return_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": -0.2199564695477101,
+        "n_features": 20,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 0.021060157612678657,
+        "rmse": 0.030052399405722872
+      },
+      "Time Series (Short-term)": {
+        "score": -0.3117585945246455,
+        "n_features": 24,
+        "ts_ops_count": 13,
+        "model": "RandomForestRegressor",
+        "mae": 0.02233829598419787,
+        "rmse": 0.031162618576947184
+      },
+      "Time Series (Medium-term)": {
+        "score": -0.1665472731018034,
+        "n_features": 22,
+        "ts_ops_count": 8,
+        "model": "RandomForestRegressor",
+        "mae": 0.021831416571886322,
+        "rmse": 0.02938719645688185
+      },
+      "Time Series (Long-term)": {
+        "score": -0.22149010925049928,
+        "n_features": 21,
+        "ts_ops_count": 8,
+        "model": "RandomForestRegressor",
+        "mae": 0.021342873301831912,
+        "rmse": 0.030071283307747238
+      },
+      "Time Series (Mixed)": {
+        "score": -0.28658267958395056,
+        "n_features": 24,
+        "ts_ops_count": 14,
+        "model": "RandomForestRegressor",
+        "mae": 0.02184165842693912,
+        "rmse": 0.030862125652528598
+      }
+    }
+  },
+  "Retail_Sales_Daily": {
+    "Sales_High_Performance": {
+      "Baseline (No Time Series)": {
+        "score": 0.9875,
+        "n_features": 13,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.9902777777777778,
+        "n_features": 12,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.9972222222222222,
+        "n_features": 12,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.9930555555555556,
+        "n_features": 12,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.9944444444444445,
+        "n_features": 13,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      }
+    },
+    "Sales_Next_Day_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": 0.6467044187859092,
+        "n_features": 17,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 1232.3427186676197,
+        "rmse": 1932.8784536204612
+      },
+      "Time Series (Short-term)": {
+        "score": 0.2724871952564526,
+        "n_features": 17,
+        "ts_ops_count": 1,
+        "model": "RandomForestRegressor",
+        "mae": 1765.907410027402,
+        "rmse": 2773.676218476981
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.6143350388106423,
+        "n_features": 18,
+        "ts_ops_count": 1,
+        "model": "RandomForestRegressor",
+        "mae": 1457.2270312100322,
+        "rmse": 2019.484545221422
+      },
+      "Time Series (Long-term)": {
+        "score": 0.6227923803944697,
+        "n_features": 15,
+        "ts_ops_count": 1,
+        "model": "RandomForestRegressor",
+        "mae": 1372.8764757333113,
+        "rmse": 1997.2189153491836
+      },
+      "Time Series (Mixed)": {
+        "score": 0.5754804250983342,
+        "n_features": 17,
+        "ts_ops_count": 3,
+        "model": "RandomForestRegressor",
+        "mae": 1542.952008436389,
+        "rmse": 2118.772377624881
+      }
+    }
+  },
+  "Energy_Consumption_Hourly": {
+    "Energy_High_Consumption": {
+      "Baseline (No Time Series)": {
+        "score": 0.7708333333333334,
+        "n_features": 17,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.7974537037037037,
+        "n_features": 14,
+        "ts_ops_count": 2,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.8287037037037037,
+        "n_features": 16,
+        "ts_ops_count": 1,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.8599537037037037,
+        "n_features": 16,
+        "ts_ops_count": 3,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.8333333333333334,
+        "n_features": 15,
+        "ts_ops_count": 1,
+        "model": "RandomForestClassifier"
+      }
+    },
+    "Energy_Next_Hour_Prediction": {
+      "Baseline (No Time Series)": {
+        "score": 0.17255141473838786,
+        "n_features": 15,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 223.58781485512552,
+        "rmse": 271.775943494883
+      },
+      "Time Series (Short-term)": {
+        "score": 0.1201044858216006,
+        "n_features": 15,
+        "ts_ops_count": 4,
+        "model": "RandomForestRegressor",
+        "mae": 231.86330929012271,
+        "rmse": 280.25673298868725
+      },
+      "Time Series (Medium-term)": {
+        "score": -0.8614068015595935,
+        "n_features": 18,
+        "ts_ops_count": 11,
+        "model": "RandomForestRegressor",
+        "mae": 339.8616084927357,
+        "rmse": 407.6253188027167
+      },
+      "Time Series (Long-term)": {
+        "score": 0.5409102127999365,
+        "n_features": 17,
+        "ts_ops_count": 4,
+        "model": "RandomForestRegressor",
+        "mae": 163.58108228994755,
+        "rmse": 202.43673261653086
+      },
+      "Time Series (Mixed)": {
+        "score": 0.3914767516976647,
+        "n_features": 15,
+        "ts_ops_count": 3,
+        "model": "RandomForestRegressor",
+        "mae": 186.39861101184138,
+        "rmse": 233.06609016983825
+      }
+    }
+  },
+  "Simple_Weekly_TimeSeries": {
+    "Simple_Weekly_Regression": {
+      "Baseline (No Time Series)": {
+        "score": -0.6854998096493383,
+        "n_features": 9,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 17.065633819606827,
+        "rmse": 18.892432219142623
+      },
+      "Time Series (Short-term)": {
+        "score": -0.06547606297562658,
+        "n_features": 8,
+        "ts_ops_count": 2,
+        "model": "RandomForestRegressor",
+        "mae": 13.20414564902753,
+        "rmse": 15.020879685053002
+      },
+      "Time Series (Medium-term)": {
+        "score": -0.6322416755066516,
+        "n_features": 8,
+        "ts_ops_count": 0,
+        "model": "RandomForestRegressor",
+        "mae": 16.62257542652677,
+        "rmse": 18.591556468508585
+      },
+      "Time Series (Long-term)": {
+        "score": -0.22745639561980835,
+        "n_features": 9,
+        "ts_ops_count": 1,
+        "model": "RandomForestRegressor",
+        "mae": 14.268634457528025,
+        "rmse": 16.122283564662304
+      },
+      "Time Series (Mixed)": {
+        "score": -0.02055290059940207,
+        "n_features": 8,
+        "ts_ops_count": 2,
+        "model": "RandomForestRegressor",
+        "mae": 12.326279341944966,
+        "rmse": 14.700810506158566
+      }
+    },
+    "Simple_Weekly_Classification": {
+      "Baseline (No Time Series)": {
+        "score": 0.7307692307692307,
+        "n_features": 8,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Short-term)": {
+        "score": 0.7115384615384616,
+        "n_features": 8,
+        "ts_ops_count": 0,
+        "model": "DecisionTreeClassifier"
+      },
+      "Time Series (Medium-term)": {
+        "score": 0.7019230769230769,
+        "n_features": 8,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Long-term)": {
+        "score": 0.7307692307692307,
+        "n_features": 8,
+        "ts_ops_count": 0,
+        "model": "RandomForestClassifier"
+      },
+      "Time Series (Mixed)": {
+        "score": 0.875,
+        "n_features": 8,
+        "ts_ops_count": 1,
+        "model": "DecisionTreeClassifier"
+      }
+    }
+  }
+}

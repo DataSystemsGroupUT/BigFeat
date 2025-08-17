@@ -1,0 +1,68 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_absolute",
+    "Gen_Feat_1_absolute",
+    "Gen_Feat_2_subtract",
+    "Gen_Feat_3_rolling_std",
+    "Gen_Feat_4_add_absolute",
+    "Gen_Feat_5_rolling_sum_original_feat",
+    "Gen_Feat_6_month_mean_absolute",
+    "Gen_Feat_7_rolling_std",
+    "Gen_Feat_8_multiply",
+    "Gen_Feat_9_seasonal_decompose",
+    "Original_Open",
+    "Original_High",
+    "Original_Low",
+    "Original_Volume",
+    "Original_Returns",
+    "Original_Volatility",
+    "Original_Price_Range",
+    "Original_SMA_7",
+    "Original_SMA_30",
+    "Original_Price_Position",
+    "Original_DayOfWeek",
+    "Original_Month"
+  ],
+  "feature_descriptions": [
+    "absolute(Returns)",
+    "absolute(Price_Range)",
+    "subtract(Returns, DayOfWeek)",
+    "rolling_std(SMA_30)",
+    "add -> absolute(DayOfWeek, Month)",
+    "rolling_sum -> original_feat(Volatility)",
+    "month_mean -> absolute -> multiply(Volatility, Price_Position)",
+    "rolling_std(Price_Position)",
+    "multiply(Volatility, Price_Position)",
+    "seasonal_decompose(Returns)",
+    "Original: Open",
+    "Original: High",
+    "Original: Low",
+    "Original: Volume",
+    "Original: Returns",
+    "Original: Volatility",
+    "Original: Price_Range",
+    "Original: SMA_7",
+    "Original: SMA_30",
+    "Original: Price_Position",
+    "Original: DayOfWeek",
+    "Original: Month"
+  ],
+  "n_generated_features": 10,
+  "n_original_features": 12,
+  "total_features": 22,
+  "ts_ops_count": 5,
+  "datetime_col": "Date",
+  "groupby_cols": [
+    "Symbol"
+  ],
+  "window_sizes": [
+    "30D",
+    "60D",
+    "90D"
+  ],
+  "lag_periods": [
+    "14D",
+    "30D"
+  ],
+  "time_step": "D"
+}

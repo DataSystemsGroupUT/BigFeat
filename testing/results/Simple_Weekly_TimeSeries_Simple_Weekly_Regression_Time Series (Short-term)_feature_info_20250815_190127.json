@@ -1,0 +1,41 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_rolling_sum_rolling_max",
+    "Gen_Feat_1_weekday_mean_weekday_mean",
+    "Original_WeekOfYear",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_IsEndOfMonth",
+    "Original_Feature1",
+    "Original_Feature2",
+    "Original_Feature3"
+  ],
+  "feature_descriptions": [
+    "rolling_sum -> rolling_max -> add -> multiply -> seasonal_decompose -> multiply(Feature3, Feature3, Feature3, Feature3)",
+    "weekday_mean -> weekday_mean -> rolling_std(Feature3)",
+    "Original: WeekOfYear",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: IsEndOfMonth",
+    "Original: Feature1",
+    "Original: Feature2",
+    "Original: Feature3"
+  ],
+  "n_generated_features": 2,
+  "n_original_features": 7,
+  "total_features": 9,
+  "ts_ops_count": 6,
+  "datetime_col": "Date",
+  "groupby_cols": [],
+  "window_sizes": [
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "lag_periods": [
+    "1D",
+    "7D",
+    "14D"
+  ],
+  "time_step": "W"
+}

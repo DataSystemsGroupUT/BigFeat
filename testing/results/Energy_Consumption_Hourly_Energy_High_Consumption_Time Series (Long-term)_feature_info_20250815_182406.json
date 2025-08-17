@@ -1,0 +1,56 @@
+{
+  "feature_names": [
+    "Gen_Feat_0_rolling_median",
+    "Gen_Feat_1_multiply",
+    "Gen_Feat_2_absolute",
+    "Gen_Feat_3_month_mean_square",
+    "Gen_Feat_4_multiply",
+    "Gen_Feat_5_month_mean_absolute",
+    "Original_Temperature",
+    "Original_Hour",
+    "Original_DayOfWeek",
+    "Original_Month",
+    "Original_Quarter",
+    "Original_IsWeekend",
+    "Original_IsHoliday",
+    "Original_IsBusinessHour",
+    "Original_HourlyPattern",
+    "Original_WeatherEffect"
+  ],
+  "feature_descriptions": [
+    "rolling_median(Temperature)",
+    "multiply(HourlyPattern, Hour)",
+    "absolute(DayOfWeek)",
+    "month_mean -> square -> add(HourlyPattern, Temperature)",
+    "multiply(WeatherEffect, HourlyPattern)",
+    "month_mean -> absolute -> multiply(Month, HourlyPattern)",
+    "Original: Temperature",
+    "Original: Hour",
+    "Original: DayOfWeek",
+    "Original: Month",
+    "Original: Quarter",
+    "Original: IsWeekend",
+    "Original: IsHoliday",
+    "Original: IsBusinessHour",
+    "Original: HourlyPattern",
+    "Original: WeatherEffect"
+  ],
+  "n_generated_features": 6,
+  "n_original_features": 10,
+  "total_features": 16,
+  "ts_ops_count": 3,
+  "datetime_col": "DateTime",
+  "groupby_cols": [],
+  "window_sizes": [
+    "7D",
+    "14D",
+    "30D",
+    "60D"
+  ],
+  "lag_periods": [
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "time_step": "H"
+}
