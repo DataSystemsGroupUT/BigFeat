@@ -13,41 +13,87 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import f1_score, make_scorer
+from bigfeat.dft_window_detector import DFTWindowDetector
 from functools import partial
 import warnings
 from datetime import timedelta
 
 
 class BigFeat:
-    """Enhanced BigFeat Class with time-based windows for time series support"""
+    def __init__(self,
+                 task_type='classification',
+                 enable_time_series='auto',  # 'yes'/'no'/'auto'
+                 window_sizes=None,
+                 lag_periods=None,
+                 verbose=True,
+                 datetime_col=None,
+                 groupby_cols=None,
+                 time_step='D',
+                 ts_operation_weight_multiplier=1.0,
+                 window_step_options=None,
 
-    def __init__(self, task_type='classification', enable_time_series=False,
-                 window_sizes=None, lag_periods=None, verbose=True,
-                 datetime_col=None, groupby_cols=None, time_step='D'):
+                 # DFT-related parameters
+                 dft_confidence_threshold=0.3,
+                 dft_min_window_days=1,
+                 dft_max_window_days=365,
+                 dft_n_windows=6):
         """
-        Initialize the BigFeat object
+        Initialize the BigFeat object with enhanced DFT-based window detection
 
         Parameters:
         -----------
         task_type : str, default='classification'
             The type of machine learning task. Either 'classification' or 'regression'.
-        enable_time_series : bool, default=False
-            Whether to enable time series operators
+
+        enable_time_series : str, default='auto'
+            Time series feature generation mode:
+            - 'yes': Force enable time series with DFT-detected windows
+            - 'no': Disable time series features entirely
+            - 'auto': Automatically detect datetime column and assess periodicity
+
         window_sizes : list of str or pd.Timedelta, optional
-            List of time-based window sizes for rolling operations
-            Examples: ['7D', '14D', '30D', '3M', '6M', '1Y'] or [pd.Timedelta(days=7), pd.Timedelta(days=30)]
+            List of time-based window sizes for rolling operations.
+            If None and enable_time_series='yes', will use DFT-detected windows.
+            If None and enable_time_series='auto', will use DFT if periodicity detected.
+            Examples: ['7D', '14D', '30D', '3M', '6M', '1Y']
+
         lag_periods : list of str or pd.Timedelta, optional
             List of time-based lag periods for time series operations
-            Examples: ['1D', '7D', '30D'] or [pd.Timedelta(days=1), pd.Timedelta(days=7)]
+            If None, will derive from detected window sizes
+            Examples: ['1D', '7D', '30D']
+
         verbose : bool, default=True
             Whether to print progress messages
+
         datetime_col : str, optional
             Name of the datetime column to use for time series operations
+            If None and enable_time_series='auto', will attempt auto-detection
+
         groupby_cols : list, optional
             List of columns to group by when applying time series operations
+
         time_step : str, default='D'
             Time step for resampling when using time-based windows
             Examples: 'D' (daily), 'H' (hourly), 'W' (weekly), 'M' (monthly)
+
+        ts_operation_weight_multiplier : float, default=1.0
+            Multiplier for time series operation weights
+
+        window_step_options : list, optional
+            List of possible window step options to choose from
+
+        dft_confidence_threshold : float, default=1.3
+            Minimum confidence score to consider periodicity reliable
+            Used in 'auto' mode to decide whether to enable time series
+
+        dft_min_window_days : int, default=3
+            Minimum window size in days for DFT detection
+
+        dft_max_window_days : int, default=365
+            Maximum window size in days for DFT detection
+
+        dft_n_windows : int, default=6
+            Number of window sizes to generate from DFT analysis
         """
         # Original initialization
         self.n_jobs = -1
@@ -55,67 +101,282 @@ class BigFeat:
         self.binary_operators = [np.multiply, np.add, np.subtract]
         self.unary_operators = [np.abs, np.square, local_utils.original_feat]
         self.task_type = task_type
+        self.verbose = verbose
+
+        # Validate enable_time_series parameter
+        if enable_time_series not in ['yes', 'no', 'auto']:
+            # Handle legacy boolean values for backward compatibility
+            if isinstance(enable_time_series, bool):
+                enable_time_series = 'yes' if enable_time_series else 'no'
+                if self.verbose:
+                    print(f"Warning: enable_time_series should be 'yes'/'no'/'auto', not boolean. "
+                          f"Converting to '{enable_time_series}'")
+            else:
+                raise ValueError("enable_time_series must be 'yes', 'no', or 'auto'")
+
+        self.enable_time_series_mode = enable_time_series
+        self.enable_time_series = False  # Will be set during fit based on mode
+
+        # DFT parameters
+        self.dft_confidence_threshold = dft_confidence_threshold
+        self.dft_min_window_days = dft_min_window_days
+        self.dft_max_window_days = dft_max_window_days
+        self.dft_n_windows = dft_n_windows
+
+        # Initialize DFT detector
+        self.dft_detector = DFTWindowDetector(
+            min_window_days=dft_min_window_days,
+            max_window_days=dft_max_window_days,
+            n_windows=dft_n_windows,
+            confidence_threshold=dft_confidence_threshold,
+            verbose=verbose
+        )
 
         # Time series parameters
-        self.enable_time_series = enable_time_series
-        self.verbose = verbose
+        self.ts_operation_weight_multiplier = ts_operation_weight_multiplier
+
+        # Window step options
+        if window_step_options is None:
+            self.window_step_options = ['D', 'H', 'W', 'M']
+        else:
+            self.window_step_options = window_step_options
+
         self.time_step = time_step
 
-        # Convert time-based windows to pandas Timedelta objects
-        if window_sizes is None:
-            self.window_sizes = [pd.Timedelta(days=7), pd.Timedelta(days=14), pd.Timedelta(days=30),
-                                 pd.Timedelta(days=90), pd.Timedelta(days=180), pd.Timedelta(days=365)]
-        else:
-            self.window_sizes = self._parse_time_periods(window_sizes)
+        # Store user-provided windows (will be overridden by DFT if needed)
+        self.user_provided_windows = window_sizes
+        self.user_provided_lags = lag_periods
 
-        if lag_periods is None:
-            self.lag_periods = [pd.Timedelta(days=1), pd.Timedelta(days=7), pd.Timedelta(days=14),
-                                pd.Timedelta(days=30), pd.Timedelta(days=90)]
-        else:
-            self.lag_periods = self._parse_time_periods(lag_periods)
+        # These will be set during fit() based on mode
+        self.window_sizes = None
+        self.lag_periods = None
 
-        # Parameters for date/time column specification
+        # Parameters for date/time column
         self.datetime_col = datetime_col
         self.groupby_cols = groupby_cols or []
-        self.original_data = None  # Store original data with datetime info
-        self.feature_columns = None  # Store feature column names
+        self.original_data = None
+        self.feature_columns = None
 
-        # Add time series operators if enabled
-        if enable_time_series:
-            self.time_series_operators = [
-                self._safe_rolling_mean,
-                self._safe_rolling_std,
-                self._safe_rolling_min,
-                self._safe_rolling_max,
-                self._safe_rolling_median,
-                self._safe_rolling_sum,
-                self._safe_lag_feature,
-                self._safe_diff_feature,
-                self._safe_pct_change,
-                self._safe_ewm,
-                self._safe_momentum,
-                self._safe_seasonal_decompose,
-                self._safe_trend_feature,
-                self._safe_weekday_mean,
-                self._safe_month_mean
-            ]
-            # Extend the original operators with time series operators
-            self.operators.extend(self.time_series_operators)
-            self.unary_operators.extend(self.time_series_operators)
-
-            if self.verbose:
-                print(f"Time series mode enabled with {len(self.time_series_operators)} additional operators")
-                print(f"Window sizes: {[str(w) for w in self.window_sizes]}")
-                print(f"Lag periods: {[str(l) for l in self.lag_periods]}")
-                if self.datetime_col:
-                    print(f"Date/time column specified: {self.datetime_col}")
-                if self.groupby_cols:
-                    print(f"Groupby columns specified: {self.groupby_cols}")
-                print(f"Time step for resampling: {self.time_step}")
+        # Tracking variables for DFT results
+        self.dft_detected_windows = None
+        self.dft_confidence_scores = None
+        self.dft_detection_strategy = None
 
         # Validate task_type input
         if task_type not in ['classification', 'regression']:
             raise ValueError("task_type must be either 'classification' or 'regression'")
+
+        if self.verbose:
+            print(f"BigFeat initialized with enable_time_series='{enable_time_series}'")
+            if enable_time_series == 'yes':
+                print("  → Time series features will be generated using DFT-detected windows")
+            elif enable_time_series == 'auto':
+                print("  → Time series will be auto-detected based on datetime column and periodicity")
+            else:
+                print("  → Time series features disabled")
+
+    def _setup_time_series(self, X, y=None):
+        """
+        Setup time series configuration based on enable_time_series_mode
+        Called at the beginning of fit()
+
+        Parameters:
+        -----------
+        X : array-like or DataFrame
+            Input features
+        y : array-like, optional
+            Target variable
+
+        Returns:
+        --------
+        bool
+            Whether time series should be enabled
+        """
+        mode = self.enable_time_series_mode
+
+        # Case 1: Explicitly disabled
+        if mode == 'no':
+            if self.verbose:
+                print("\n=== Time Series: DISABLED ===")
+            self.enable_time_series = False
+            return False
+
+        # Case 2: Explicitly enabled ('yes')
+        if mode == 'yes':
+            if self.verbose:
+                print("\n=== Time Series: ENABLED (forced) ===")
+
+            # Must have datetime column
+            if self.datetime_col is None:
+                if self.verbose:
+                    print("Error: enable_time_series='yes' requires datetime_col to be specified")
+                raise ValueError("datetime_col must be specified when enable_time_series='yes'")
+
+            # Get feature columns
+            if isinstance(X, pd.DataFrame):
+                feature_cols = self._identify_feature_columns(X)
+            else:
+                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+
+            # Detect optimal windows using DFT
+            if self.user_provided_windows is None:
+                if self.verbose:
+                    print("\nRunning DFT to detect optimal window sizes...")
+
+                try:
+                    self.dft_detected_windows, self.dft_confidence_scores = \
+                        self.dft_detector.detect_optimal_windows(
+                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                            self.datetime_col,
+                            feature_cols,
+                            sampling_rate=self.time_step
+                        )
+
+                    self.window_sizes = self.dft_detected_windows
+                    self.dft_detection_strategy = 'dft'
+
+                    if self.verbose:
+                        avg_conf = np.mean(list(self.dft_confidence_scores.values()))
+                        print(f"DFT detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
+
+                except Exception as e:
+                    if self.verbose:
+                        print(f"Warning: DFT detection failed: {str(e)}")
+                        print("Falling back to default windows")
+                    self.window_sizes = self._get_default_windows()
+                    self.dft_detection_strategy = 'default'
+            else:
+                # Use user-provided windows
+                self.window_sizes = self._parse_time_periods(self.user_provided_windows)
+                self.dft_detection_strategy = 'user_provided'
+                if self.verbose:
+                    print(f"Using {len(self.window_sizes)} user-provided window sizes")
+
+            # Set lag periods
+            if self.user_provided_lags is None:
+                # Derive from window sizes
+                self.lag_periods = [
+                    self.window_sizes[0],  # Smallest window
+                    self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                    self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                ]
+            else:
+                self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+
+            self.enable_time_series = True
+            self._add_time_series_operators()
+            return True
+
+        # Case 3: Auto mode
+        if mode == 'auto':
+            if self.verbose:
+                print("\n=== Time Series: AUTO-DETECTION ===")
+
+            # Step 1: Try to find datetime column
+            if self.datetime_col is None:
+                if isinstance(X, pd.DataFrame):
+                    detected_dt_col = self.dft_detector.detect_datetime_column(X)
+                    if detected_dt_col:
+                        self.datetime_col = detected_dt_col
+                    else:
+                        if self.verbose:
+                            print("No datetime column found → Time series DISABLED")
+                        self.enable_time_series = False
+                        return False
+                else:
+                    if self.verbose:
+                        print("Input is not a DataFrame, cannot auto-detect datetime → Time series DISABLED")
+                    self.enable_time_series = False
+                    return False
+
+            # Step 2: Get feature columns
+            if isinstance(X, pd.DataFrame):
+                feature_cols = self._identify_feature_columns(X)
+            else:
+                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+
+            # Step 3: Run DFT and assess periodicity
+            if self.verbose:
+                print("\nAssessing periodicity using DFT...")
+
+            try:
+                is_periodic, avg_confidence, feature_confidences = \
+                    self.dft_detector.assess_periodicity(
+                        self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                        self.datetime_col,
+                        feature_cols
+                    )
+
+                # Step 4: Decide based on confidence
+                if is_periodic:
+                    if self.verbose:
+                        print(
+                            f"✓ Periodicity detected (confidence={avg_confidence:.2f} > {self.dft_confidence_threshold})")
+                        print("  → Time series ENABLED with DFT-detected windows")
+                    # Use smart window selection
+                    self.window_sizes, self.dft_detection_strategy = \
+                        self.dft_detector.smart_window_selection(
+                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                            self.datetime_col,
+                            feature_cols
+                        )
+
+                    self.dft_detected_windows = self.window_sizes
+                    self.dft_confidence_scores = feature_confidences
+
+                    # Set lag periods
+                    if self.user_provided_lags is None:
+                        self.lag_periods = [
+                            self.window_sizes[0],
+                            self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                            self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                        ]
+                    else:
+                        self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+
+                    self.enable_time_series = True
+                    self._add_time_series_operators()
+            except:
+                pass
+            return
+
+    def _initialize_operator_weights(self):
+        """
+        Initialize operator weights with enhanced time series weighting
+        """
+        # Start with equal weights for all operators
+        self.imp_operators = np.ones(len(self.operators))
+
+        if self.enable_time_series and hasattr(self, 'time_series_operators'):
+            # Apply enhanced weighting to time series operations
+            for i, op in enumerate(self.operators):
+                if op in self.time_series_operators:
+                    self.imp_operators[i] *= self.ts_operation_weight_multiplier
+                    if self.verbose:
+                        op_name = getattr(op, '__name__', str(op))
+                        print(f"Applied {self.ts_operation_weight_multiplier}x weight to {op_name}")
+
+        # Normalize weights
+        self.operator_weights = self.imp_operators / self.imp_operators.sum()
+
+        if self.verbose and self.enable_time_series:
+            ts_weight_sum = sum(self.operator_weights[i] for i, op in enumerate(self.operators)
+                                if hasattr(self, 'time_series_operators') and op in self.time_series_operators)
+            print(f"Time series operations total weight: {ts_weight_sum:.3f} ({ts_weight_sum * 100:.1f}%)")
+
+    def _select_window_step(self):
+        """
+        Randomly select a window step from available options - FIXED VERSION
+        """
+        if hasattr(self, 'rng') and self.window_step_options:
+            # Only select from valid options for time-based operations
+            valid_options = [opt for opt in self.window_step_options if opt in ['D', 'H', 'W']]
+            if valid_options:
+                selected_step = self.rng.choice(valid_options)
+                if self.verbose:
+                    print(f"Selected window step: {selected_step}")
+                return selected_step
+        return 'D'  # Default to daily if no valid options
 
     def _parse_time_periods(self, periods):
         """
@@ -204,8 +465,8 @@ class BigFeat:
             df[self.datetime_col] = pd.to_datetime(df[self.datetime_col])
 
         # Sort by datetime and groupby columns for proper time series order
-        sort_cols= [col for col in self.groupby_cols if col in df.columns]
-        sort_cols.extend([self.datetime_col] if self.datetime_col in df.columns else [])
+        sort_cols = [self.datetime_col] if self.datetime_col in df.columns else []
+        sort_cols.extend([col for col in self.groupby_cols if col in df.columns])
 
         if sort_cols:
             df = df.sort_values(sort_cols).reset_index(drop=True)
@@ -214,7 +475,7 @@ class BigFeat:
 
     def _apply_time_based_operation(self, data, feature_col, operation, window_size=None, lag_period=None):
         """
-        Apply time-based series operation to a specific feature column with proper grouping
+        Apply time-based series operation to a specific feature column with proper grouping - FIXED VERSION
 
         Parameters:
         -----------
@@ -238,39 +499,66 @@ class BigFeat:
             if feature_col not in data.columns or self.datetime_col not in data.columns:
                 return np.zeros(len(data))
 
-            # Set datetime as index for time-based operations
+            # Dynamically select window step for this operation
+            current_step = self._select_window_step()
+
+            # Check if we have groupby columns
             if self.groupby_cols and any(col in data.columns for col in self.groupby_cols):
                 # Group data by groupby columns
                 groupby_cols = [col for col in self.groupby_cols if col in data.columns]
 
                 results = []
-                for name, group in data.groupby(groupby_cols):
-                    group_sorted = group.set_index(self.datetime_col).sort_index()
-                    group_result = self._apply_single_group_operation(
-                        group_sorted, feature_col, operation, window_size, lag_period
-                    )
-                    # Restore original order
-                    group_result = group_result.reindex(group[self.datetime_col]).values
-                    results.extend(group_result)
+                indices = []
 
-                return np.array(results)
+                for name, group in data.groupby(groupby_cols, sort=False):
+                    # Sort group by datetime
+                    group_sorted = group.sort_values(self.datetime_col)
+                    group_with_index = group_sorted.set_index(self.datetime_col)
+
+                    # Apply operation to this group
+                    group_result = self._apply_single_group_operation(
+                        group_with_index, feature_col, operation,
+                        window_size, lag_period, current_step
+                    )
+
+                    # Store results with original indices
+                    results.append(group_result.values)
+                    indices.extend(group_sorted.index.tolist())
+
+                # Combine results maintaining original order
+                result_series = pd.Series(
+                    np.concatenate(results),
+                    index=indices
+                )
+                # Reindex to match original data order
+                result = result_series.reindex(data.index).fillna(0).values
+
             else:
                 # Single group operation
-                data_sorted = data.set_index(self.datetime_col).sort_index()
-                result = self._apply_single_group_operation(
-                    data_sorted, feature_col, operation, window_size, lag_period
+                data_sorted = data.sort_values(self.datetime_col)
+                data_with_index = data_sorted.set_index(self.datetime_col)
+
+                result_series = self._apply_single_group_operation(
+                    data_with_index, feature_col, operation,
+                    window_size, lag_period, current_step
                 )
-                # Restore original order
-                return result.reindex(data[self.datetime_col]).values
+
+                # Reindex to match original data order
+                result = result_series.reindex(
+                    data.set_index(self.datetime_col).index
+                ).fillna(0).values
+
+            return result
 
         except Exception as e:
             if self.verbose:
-                print(f"Warning: Time-based operation {operation} failed for {feature_col}: {str(e)}")
+                print(f"    Warning: Time-based operation {operation} failed for {feature_col}: {str(e)}")
             return np.zeros(len(data))
 
-    def _apply_single_group_operation(self, data, feature_col, operation, window_size=None, lag_period=None):
+    def _apply_single_group_operation(self, data, feature_col, operation, window_size=None, lag_period=None,
+                                      time_step=None):
         """
-        Apply operation to a single group with datetime index
+        Apply operation to a single group with datetime index - FIXED VERSION
 
         Parameters:
         -----------
@@ -284,6 +572,8 @@ class BigFeat:
             Window size
         lag_period : pd.Timedelta, optional
             Lag period
+        time_step : str, optional
+            Time step for operations
 
         Returns:
         --------
@@ -291,140 +581,129 @@ class BigFeat:
             Result series with datetime index
         """
         series = data[feature_col]
+        current_time_step = time_step or self.time_step
 
-        if operation == 'rolling_mean':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).mean()
+        try:
+            if operation == 'rolling_mean':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).mean()
 
-        elif operation == 'rolling_std':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).std().fillna(0)
+            elif operation == 'rolling_std':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).std().fillna(0)
 
-        elif operation == 'rolling_min':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).min()
+            elif operation == 'rolling_min':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).min()
 
-        elif operation == 'rolling_max':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).max()
+            elif operation == 'rolling_max':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).max()
 
-        elif operation == 'rolling_median':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).median()
+            elif operation == 'rolling_median':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).median()
 
-        elif operation == 'rolling_sum':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            result = series.rolling(window=window_size, min_periods=1).sum()
+            elif operation == 'rolling_sum':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                result = series.rolling(window=window_size, min_periods=1).sum()
 
-        elif operation == 'lag':
-            lag_period = lag_period or self.rng.choice(self.lag_periods)
-            # Create a shifted index
-            shifted_index = series.index - lag_period
-            result = pd.Series(index=series.index, dtype=float)
-            for idx in series.index:
-                shifted_idx = idx - lag_period
-                # Find the closest timestamp within a reasonable tolerance
-                tolerance = pd.Timedelta(self.time_step) if isinstance(self.time_step, str) else self.time_step
-                mask = (series.index >= shifted_idx - tolerance) & (series.index <= shifted_idx + tolerance)
-                if mask.any():
-                    result[idx] = series[mask].iloc[0]
+            elif operation == 'lag':
+                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                # FIX: Use shift with freq parameter for time-aware shifting
+                result = series.shift(freq=lag_period)
+                # Reindex to match original index and forward fill
+                result = result.reindex(series.index, method='ffill').fillna(0)
+
+            elif operation == 'diff':
+                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                # FIX: Use shift with freq parameter
+                lagged = series.shift(freq=lag_period)
+                lagged = lagged.reindex(series.index, method='ffill').fillna(0)
+                result = series - lagged
+                result = result.fillna(0)
+
+            elif operation == 'pct_change':
+                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                # FIX: Use shift with freq parameter
+                lagged = series.shift(freq=lag_period)
+                lagged = lagged.reindex(series.index, method='ffill').fillna(0)
+                # Avoid division by zero
+                result = pd.Series(index=series.index, dtype=float)
+                mask = lagged != 0
+                result[mask] = (series[mask] - lagged[mask]) / lagged[mask]
+                result[~mask] = 0
+                result = result.fillna(0)
+
+            elif operation == 'ewm':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                # FIX: Convert timedelta to numeric span for EWM
+                # Use approximate number of periods based on time_step
+                if current_time_step == 'D':
+                    span = window_size.days
+                elif current_time_step == 'H':
+                    span = window_size.total_seconds() / 3600
+                elif current_time_step == 'W':
+                    span = window_size.days / 7
+                elif current_time_step == 'M':
+                    span = window_size.days / 30
                 else:
-                    result[idx] = np.nan
-            result = result.fillna(method='ffill').fillna(0)
+                    span = window_size.days
 
-        elif operation == 'diff':
-            lag_period = lag_period or self.rng.choice(self.lag_periods)
-            # Similar to lag but compute difference
-            shifted_index = series.index - lag_period
-            result = pd.Series(index=series.index, dtype=float)
-            for idx in series.index:
-                shifted_idx = idx - lag_period
-                tolerance = pd.Timedelta(self.time_step) if isinstance(self.time_step, str) else self.time_step
-                mask = (series.index >= shifted_idx - tolerance) & (series.index <= shifted_idx + tolerance)
-                if mask.any():
-                    result[idx] = series[idx] - series[mask].iloc[0]
-                else:
-                    result[idx] = 0
-            result = result.fillna(0)
+                # Ensure span is at least 1
+                span = max(1, int(span))
+                result = series.ewm(span=span, adjust=False).mean()
 
-        elif operation == 'pct_change':
-            lag_period = lag_period or self.rng.choice(self.lag_periods)
-            # Percentage change over time period
-            shifted_index = series.index - lag_period
-            result = pd.Series(index=series.index, dtype=float)
-            for idx in series.index:
-                shifted_idx = idx - lag_period
-                tolerance = pd.Timedelta(self.time_step) if isinstance(self.time_step, str) else self.time_step
-                mask = (series.index >= shifted_idx - tolerance) & (series.index <= shifted_idx + tolerance)
-                if mask.any():
-                    old_val = series[mask].iloc[0]
-                    if old_val != 0:
-                        result[idx] = (series[idx] - old_val) / old_val
+            elif operation == 'momentum':
+                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                # Momentum is just difference, use the fixed diff logic
+                lagged = series.shift(freq=lag_period)
+                lagged = lagged.reindex(series.index, method='ffill').fillna(0)
+                result = series - lagged
+                result = result.fillna(0)
+
+            elif operation == 'seasonal_decompose':
+                try:
+                    # Simple seasonal pattern based on day of year
+                    if len(series) > 7:
+                        # Group by day of year and calculate mean
+                        seasonal_means = series.groupby(series.index.dayofyear).transform('mean')
+                        result = seasonal_means
                     else:
-                        result[idx] = 0
-                else:
-                    result[idx] = 0
-            result = result.fillna(0)
-
-        elif operation == 'ewm':
-            # Use time-based exponential weighting
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            halflife = window_size / 2
-            result = series.ewm(halflife=halflife).mean()
-
-        elif operation == 'momentum':
-            lag_period = lag_period or self.rng.choice(self.lag_periods)
-            # Momentum as difference from lag period
-            result = self._apply_single_group_operation(data, feature_col, 'diff', None, lag_period)
-
-        elif operation == 'seasonal_decompose':
-            # Simple seasonal pattern extraction
-            try:
-                # Resample to regular frequency for seasonal decomposition
-                resampled = series.resample(self.time_step).mean().fillna(method='ffill')
-                if len(resampled) > 2:
-                    # Simple seasonal pattern using day of year
-                    seasonal_pattern = resampled.groupby(resampled.index.dayofyear).transform('mean')
-                    # Map back to original index
-                    result = pd.Series(index=series.index, dtype=float)
-                    for idx in series.index:
-                        day_of_year = idx.dayofyear
-                        matching_seasonal = seasonal_pattern[seasonal_pattern.index.dayofyear == day_of_year]
-                        if len(matching_seasonal) > 0:
-                            result[idx] = matching_seasonal.iloc[0]
-                        else:
-                            result[idx] = series.mean()
-                else:
+                        result = pd.Series(series.mean(), index=series.index)
+                except Exception:
                     result = pd.Series(series.mean(), index=series.index)
-            except:
-                result = pd.Series(series.mean(), index=series.index)
 
-        elif operation == 'trend':
-            window_size = window_size or self.rng.choice(self.window_sizes)
-            # Simple trend as rolling slope
-            result = series.rolling(window=window_size, min_periods=2).apply(
-                lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0, raw=True
-            ).fillna(0)
+            elif operation == 'trend':
+                window_size = window_size or self.rng.choice(self.window_sizes)
+                # Calculate trend as rolling linear regression slope
+                result = series.rolling(window=window_size, min_periods=2).apply(
+                    lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0,
+                    raw=True
+                ).fillna(0)
 
-        elif operation == 'weekday_mean':
-            # Mean value by weekday
-            weekday_means = series.groupby(series.index.dayofweek).mean()
-            result = pd.Series(index=series.index, dtype=float)
-            for idx in series.index:
-                result[idx] = weekday_means.get(idx.dayofweek, series.mean())
+            elif operation == 'weekday_mean':
+                # Calculate mean for each weekday
+                weekday_means = series.groupby(series.index.dayofweek).transform('mean')
+                result = weekday_means
 
-        elif operation == 'month_mean':
-            # Mean value by month
-            month_means = series.groupby(series.index.month).mean()
-            result = pd.Series(index=series.index, dtype=float)
-            for idx in series.index:
-                result[idx] = month_means.get(idx.month, series.mean())
-        else:
-            result = pd.Series(0, index=series.index)
+            elif operation == 'month_mean':
+                # Calculate mean for each month
+                month_means = series.groupby(series.index.month).transform('mean')
+                result = month_means
 
-        return result
+            else:
+                result = pd.Series(0, index=series.index)
 
-    # Time Series Utility Methods (unchanged)
+            return result
+
+        except Exception as e:
+            # If operation fails, return zeros
+            if self.verbose:
+                print(f"    Warning: Operation {operation} failed: {str(e)}")
+            return pd.Series(0, index=series.index)
+
+    # Time Series Utility Methods
     def _clean_feature(self, feature_data):
         """Clean feature data to ensure stability"""
         try:
@@ -690,87 +969,84 @@ class BigFeat:
             except Exception:
                 return feature_data
 
-    # Updated fit method to handle DataFrame input with datetime column (unchanged from previous version)
     def fit(self, X, y, gen_size=5, random_state=0, iterations=5, estimator='avg',
             feat_imps=True, split_feats=None, check_corr=True, selection='stability', combine_res=True):
-        """ Generated Features using test set - Enhanced for datetime-aware time series operations """
+        """
+        Generate Features using test set - Enhanced for DFT-based time series detection
 
-        if self.verbose and self.enable_time_series:
-            print(
-                f"Starting BigFeat with time-based series support. Data shape: {X.shape if hasattr(X, 'shape') else len(X)}")
+        Parameters:
+        -----------
+        X : array-like or DataFrame
+            Input features
+        y : array-like
+            Target variable
+        gen_size : int, default=5
+            Number of features to generate per iteration
+        random_state : int, default=0
+            Random seed for reproducibility
+        iterations : int, default=5
+            Number of feature generation iterations
+        estimator : str, default='avg'
+            Estimator type for feature importance ('avg', 'rf', 'rf_reg')
+        feat_imps : bool, default=True
+            Whether to compute feature importances
+        split_feats : str, optional
+            Feature split strategy ('comb', 'splits', or None)
+        check_corr : bool, default=True
+            Whether to check and remove correlated features
+        selection : str, default='stability'
+            Feature selection method ('stability' or 'fAnova')
+        combine_res : bool, default=True
+            Whether to combine results across iterations
 
-        # Store original data if it's a DataFrame (for datetime column access)
+        Returns:
+        --------
+        gen_feats : ndarray
+            Generated and selected features
+        """
+
+        if self.verbose:
+            print("\n" + "=" * 60)
+            print("BigFeat Feature Generation Started")
+            print("=" * 60)
+
+        # Store original data if it's a DataFrame
         if isinstance(X, pd.DataFrame):
             self.original_data = X.copy()
-            # Identify feature columns by excluding datetime and groupby columns
-            exclude_cols = []
-            if self.datetime_col and self.datetime_col in X.columns:
-                exclude_cols.append(self.datetime_col)
-            exclude_cols.extend([col for col in self.groupby_cols if col in X.columns])
-
-            # Get all potential feature columns
-            all_feature_cols = [col for col in X.columns if col not in exclude_cols]
-
-            # Filter out any non-numeric columns more carefully
-            numeric_feature_cols = []
-            for col in all_feature_cols:
-                col_dtype = str(X[col].dtype)
-                # Skip datetime-like columns and object columns that might contain timestamps
-                if (col_dtype.startswith('datetime') or
-                        col_dtype.startswith('<M8') or  # numpy datetime64
-                        col_dtype == 'object'):
-                    # For object columns, check if they contain datetime-like objects
-                    if col_dtype == 'object':
-                        try:
-                            sample_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else None
-                            if sample_val is not None and hasattr(sample_val, 'year'):
-                                # Likely a datetime object
-                                if self.verbose:
-                                    print(f"Warning: Skipping datetime-like column '{col}'")
-                                continue
-                        except:
-                            pass
-                    else:
-                        if self.verbose:
-                            print(f"Warning: Skipping datetime column '{col}' (type: {col_dtype})")
-                        continue
-
-                # Test if the column is actually numeric
-                try:
-                    # Try to convert a sample to float
-                    test_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else 0
-                    float(test_val)
-                    numeric_feature_cols.append(col)
-                except (ValueError, TypeError):
-                    if self.verbose:
-                        print(f"Warning: Skipping non-numeric column '{col}' (type: {col_dtype})")
-                    continue
-
-            self.feature_columns = numeric_feature_cols
-            # Extract feature data for processing
-            if len(self.feature_columns) > 0:
-                X_features = X[self.feature_columns].values
-                # Ensure all values are numeric - this should now be safe
-                X_features = np.array(X_features, dtype=float)
-            else:
-                raise ValueError("No numeric feature columns found after filtering!")
         else:
-            X_features = X
-            # Ensure it's numeric
+            self.original_data = X
+
+        # === CRITICAL: Setup time series based on mode ===
+        ts_enabled = self._setup_time_series(X, y)
+
+        # Identify and extract feature columns
+        if isinstance(X, pd.DataFrame):
+            self.feature_columns = self._identify_feature_columns(X)
+
+            if len(self.feature_columns) == 0:
+                raise ValueError("No numeric feature columns found after filtering!")
+
+            X_features = X[self.feature_columns].values
             X_features = np.array(X_features, dtype=float)
+
+            if self.verbose:
+                print(f"\nIdentified {len(self.feature_columns)} numeric feature columns")
+        else:
+            X_features = np.array(X, dtype=float)
             if hasattr(X, 'columns'):
                 self.feature_columns = list(X.columns)
             else:
                 self.feature_columns = [f'feature_{i}' for i in range(X_features.shape[1])]
 
-        # Prepare time series data
+        # Prepare time series data if enabled
         if self.enable_time_series:
             self._current_data = self._prepare_time_series_data(X)
+            if self.verbose:
+                print(f"✓ Time series data prepared with datetime column: '{self.datetime_col}'")
 
-        # Original initialization - unchanged
+        # === Original BigFeat initialization ===
         self.selection = selection
-        self.imp_operators = np.ones(5)
-        self.imp_operators. += np.ones(len(self.feature_columns) - 5) * 2
+        self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
         self.gen_steps = []
         self.n_feats = X_features.shape[1]
@@ -779,10 +1055,13 @@ class BigFeat:
         self.comb_mat = np.ones((self.n_feats, self.n_feats))
         self.split_vec = np.ones(self.n_feats)
 
-        # Set RNG seed if provided for numpy - original
+        # Set RNG seed
         self.rng = np.random.RandomState(seed=random_state)
 
-        # Original variable initialization
+        # Initialize enhanced operator weights (includes TS if enabled)
+        self._initialize_operator_weights()
+
+        # Initialize feature arrays
         gen_feats = np.zeros((self.n_rows, self.n_feats * gen_size))
         iters_comb = np.zeros((self.n_rows, self.n_feats * iterations))
         depths_comb = np.zeros(self.n_feats * iterations)
@@ -793,15 +1072,21 @@ class BigFeat:
         self.depth_weights = 1 / (2 ** self.depth_range)
         self.depth_weights /= self.depth_weights.sum()
 
-        # Original scaling
+        # Scaling
         self.scaler = MinMaxScaler()
         self.scaler.fit(X_features)
         X_scaled = self.scaler.transform(X_features)
 
-        # Original feature importance calculation
+        # Feature importance calculation
         if feat_imps:
-            self.ig_vector, estimators = self.get_feature_importances(X_scaled, y, estimator, random_state)
+            if self.verbose:
+                print(f"\nComputing feature importances using '{estimator}' estimator...")
+
+            self.ig_vector, estimators = self.get_feature_importances(
+                X_scaled, y, estimator, random_state
+            )
             self.ig_vector /= self.ig_vector.sum()
+
             for tree in estimators:
                 paths = self.get_paths(tree, np.arange(X_scaled.shape[1]))
                 self.get_split_feats(paths, self.split_vec)
@@ -813,24 +1098,36 @@ class BigFeat:
             elif split_feats == "splits":
                 self.ig_vector = self.split_vec
 
-        # Original iteration loop with enhanced time series support
+        # === Feature Generation Iterations ===
+        if self.verbose:
+            print(f"\nStarting {iterations} feature generation iterations...")
+
         for iteration in range(iterations):
             if self.verbose:
-                print(f"Feature generation iteration {iteration + 1}/{iterations}")
+                print(f"\n--- Iteration {iteration + 1}/{iterations} ---")
+                if self.enable_time_series:
+                    ts_weight_sum = sum(
+                        self.operator_weights[i] for i, op in enumerate(self.operators)
+                        if hasattr(self, 'time_series_operators') and op in self.time_series_operators
+                    )
+                    print(f"  Time series operations weight: {ts_weight_sum:.3f} ({ts_weight_sum * 100:.1f}%)")
 
             self.tracking_ops = []
             self.tracking_ids = []
             gen_feats = np.zeros((self.n_rows, self.n_feats * gen_size))
             self.feat_depths = np.zeros(gen_feats.shape[1])
 
+            # Generate features
             for i in range(gen_feats.shape[1]):
                 dpth = self.rng.choice(self.depth_range, p=self.depth_weights)
                 ops = []
                 ids = []
-                gen_feats[:, i] = self.feat_with_depth(X_scaled, dpth, ops, ids)  # ops and ids are updated
+                gen_feats[:, i] = self.feat_with_depth(X_scaled, dpth, ops, ids)
+
                 # Clean generated feature if time series is enabled
                 if self.enable_time_series:
                     gen_feats[:, i] = self._clean_feature(gen_feats[:, i])
+
                 self.feat_depths[i] = dpth
                 self.tracking_ops.append(ops)
                 self.tracking_ids.append(ids)
@@ -838,7 +1135,10 @@ class BigFeat:
             self.tracking_ids = np.array(self.tracking_ids + [[]], dtype='object')[:-1]
             self.tracking_ops = np.array(self.tracking_ops + [[]], dtype='object')[:-1]
 
-            # Original feature selection within iteration
+            # Feature selection within iteration
+            if self.verbose:
+                print(f"  Selecting top {self.n_feats} features from {gen_feats.shape[1]} generated...")
+
             imps, estimators = self.get_feature_importances(gen_feats, y, estimator, random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
@@ -847,22 +1147,36 @@ class BigFeat:
             self.tracking_ops = self.tracking_ops[feat_args]
             self.feat_depths = self.feat_depths[feat_args]
 
-            # Original combination tracking
+            # Store iteration results
             depths_comb[iteration * self.n_feats:(iteration + 1) * self.n_feats] = self.feat_depths
             ids_comb[iteration * self.n_feats:(iteration + 1) * self.n_feats] = self.tracking_ids
             ops_comb[iteration * self.n_feats:(iteration + 1) * self.n_feats] = self.tracking_ops
             iters_comb[:, iteration * self.n_feats:(iteration + 1) * self.n_feats] = gen_feats
 
-            # Original operator importance update - now includes time series operators
+            # Update operator importance
             for i, op in enumerate(self.operators):
                 for feat in self.tracking_ops:
                     for feat_op in feat:
                         if op == feat_op[0]:
-                            self.imp_operators[i] += 1
+                            weight_increment = 1
+                            if hasattr(self, 'time_series_operators') and op in self.time_series_operators:
+                                weight_increment *= self.ts_operation_weight_multiplier
+                            self.imp_operators[i] += weight_increment
+
             self.operator_weights = self.imp_operators / self.imp_operators.sum()
 
-        # Original final selection logic
+        if self.verbose and self.enable_time_series:
+            ts_weight_sum = sum(
+                self.operator_weights[i] for i, op in enumerate(self.operators)
+                if hasattr(self, 'time_series_operators') and op in self.time_series_operators
+            )
+            print(f"\n✓ Final time series operations weight: {ts_weight_sum:.3f} ({ts_weight_sum * 100:.1f}%)")
+
+        # === Final Feature Selection ===
         if selection == 'stability' and iterations > 1 and combine_res:
+            if self.verbose:
+                print(f"\nCombining results across {iterations} iterations...")
+
             imps, estimators = self.get_feature_importances(iters_comb, y, estimator, random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
@@ -871,33 +1185,99 @@ class BigFeat:
             self.tracking_ops = ops_comb[feat_args]
             self.feat_depths = depths_comb[feat_args]
 
+        # Check correlations
         if selection == 'stability' and check_corr:
+            if self.verbose:
+                print("Checking for correlated features...")
+
             gen_feats, to_drop_cor = self.check_correlations(gen_feats)
             self.tracking_ids = np.delete(self.tracking_ids, to_drop_cor)
             self.tracking_ops = np.delete(self.tracking_ops, to_drop_cor)
             self.feat_depths = np.delete(self.feat_depths, to_drop_cor)
 
-        # Original final combination
+            if self.verbose and len(to_drop_cor) > 0:
+                print(f"  Removed {len(to_drop_cor)} correlated features")
+
+        # Combine with original features
         gen_feats = np.hstack((gen_feats, X_scaled))
 
+        # fAnova selection
         if selection == 'fAnova':
-            # Use the appropriate feature selection method based on task type
+            if self.verbose:
+                print(f"Applying fAnova selection (k={self.n_feats})...")
+
             if self.task_type == 'classification':
                 self.fAnova_best = SelectKBest(f_classif, k=self.n_feats)
-            else:  # regression
+            else:
                 self.fAnova_best = SelectKBest(f_regression, k=self.n_feats)
             gen_feats = self.fAnova_best.fit_transform(gen_feats, y)
 
+        # === Final Summary ===
         if self.verbose:
-            print(f"Feature generation completed. Final shape: {gen_feats.shape}")
+            print("\n" + "=" * 60)
+            print("Feature Generation Completed")
+            print("=" * 60)
+            print(f"Final feature shape: {gen_feats.shape}")
+            print(f"Original features: {X_features.shape[1]}")
+            print(f"Generated features: {gen_feats.shape[1] - X_features.shape[1]}")
+
             if self.enable_time_series:
-                ts_ops_count = sum(1 for ops in self.tracking_ops
-                                   for op_info in ops
-                                   if len(op_info) > 0 and callable(op_info[0]) and op_info[
-                                       0] in self.time_series_operators)
+                ts_ops_count = sum(
+                    1 for ops in self.tracking_ops
+                    for op_info in ops
+                    if len(op_info) > 0 and callable(op_info[0]) and
+                    hasattr(self, 'time_series_operators') and
+                    op_info[0] in self.time_series_operators
+                )
                 print(f"Time series operations used: {ts_ops_count}")
 
+            print("=" * 60 + "\n")
+
+            # Print DFT summary if time series was used
+            if self.enable_time_series and self.dft_detection_strategy:
+                self.print_dft_summary()
+
         return gen_feats
+
+    # Method to update time series weights dynamically
+    def update_ts_weight_multiplier(self, new_multiplier):
+        """
+        Update the time series operation weight multiplier
+
+        Parameters:
+        -----------
+        new_multiplier : float
+            New weight multiplier for time series operations
+        """
+        old_multiplier = self.ts_operation_weight_multiplier
+        self.ts_operation_weight_multiplier = new_multiplier
+
+        if hasattr(self, 'imp_operators') and hasattr(self, 'time_series_operators'):
+            # Update existing weights
+            for i, op in enumerate(self.operators):
+                if op in self.time_series_operators:
+                    # Remove old multiplier and apply new one
+                    self.imp_operators[i] = (self.imp_operators[i] / old_multiplier) * new_multiplier
+
+            # Renormalize
+            self.operator_weights = self.imp_operators / self.imp_operators.sum()
+
+            if self.verbose:
+                print(f"Updated time series weight multiplier from {old_multiplier} to {new_multiplier}")
+
+    # Method to update window step options
+    def update_window_step_options(self, new_options):
+        """
+        Update the available window step options
+
+        Parameters:
+        -----------
+        new_options : list
+            New list of window step options
+        """
+        self.window_step_options = new_options
+        if self.verbose:
+            print(f"Updated window step options to: {self.window_step_options}")
 
     def transform(self, X):
         """ Produce features from the fitted BigFeat object - Enhanced for datetime-aware operations """
@@ -1205,3 +1585,435 @@ class BigFeat:
             for pt in paths:
                 if i in pt:
                     split_vec[i] += 1
+
+    def _get_default_windows(self):
+        """
+        Get default window sizes when DFT is not used or fails
+
+        Returns:
+        --------
+        list of pd.Timedelta
+            Default window sizes
+        """
+        default_windows = [
+            pd.Timedelta(days=7),
+            pd.Timedelta(days=14),
+            pd.Timedelta(days=30),
+            pd.Timedelta(days=90),
+            pd.Timedelta(days=180),
+            pd.Timedelta(days=365)
+        ]
+
+        # Filter by constraints if DFT parameters are set
+        if hasattr(self, 'dft_min_window_days') and hasattr(self, 'dft_max_window_days'):
+            filtered = [w for w in default_windows
+                        if self.dft_min_window_days <= w.days <= self.dft_max_window_days]
+
+            # Return top n_windows if that parameter exists
+            if hasattr(self, 'dft_n_windows') and len(filtered) > self.dft_n_windows:
+                return filtered[:self.dft_n_windows]
+            return filtered
+
+        return default_windows
+
+    def _add_time_series_operators(self):
+        """
+        Add time series operators to the operator list
+        Called when time series is enabled
+        """
+        # Check if already added to avoid duplicates
+        if hasattr(self, '_ts_operators_added') and self._ts_operators_added:
+            return
+
+        # Define time series operators if not already defined
+        if not hasattr(self, 'time_series_operators'):
+            self.time_series_operators = [
+                self._safe_rolling_mean,
+                self._safe_rolling_std,
+                self._safe_rolling_min,
+                self._safe_rolling_max,
+                self._safe_rolling_median,
+                self._safe_rolling_sum,
+                self._safe_lag_feature,
+                self._safe_diff_feature,
+                self._safe_pct_change,
+                self._safe_ewm,
+                self._safe_momentum,
+                self._safe_seasonal_decompose,
+                self._safe_trend_feature,
+                self._safe_weekday_mean,
+                self._safe_month_mean
+            ]
+
+        # Extend the original operators with time series operators
+        self.operators.extend(self.time_series_operators)
+        self.unary_operators.extend(self.time_series_operators)
+
+        # Mark as added
+        self._ts_operators_added = True
+
+        if self.verbose:
+            print(f"\n✓ Added {len(self.time_series_operators)} time series operators")
+            print(f"  Window sizes: {[str(w) for w in self.window_sizes]}")
+            print(f"  Lag periods: {[str(l) for l in self.lag_periods]}")
+
+    def _identify_feature_columns(self, X):
+        """
+        Identify numeric feature columns, excluding datetime and groupby columns
+
+        Parameters:
+        -----------
+        X : DataFrame
+            Input dataframe
+
+        Returns:
+        --------
+        list
+            List of feature column names
+        """
+        if not isinstance(X, pd.DataFrame):
+            # If not a DataFrame, return all columns or generate names
+            if hasattr(X, 'shape'):
+                return [f'feature_{i}' for i in range(X.shape[1])]
+            return []
+
+        # Exclude datetime and groupby columns
+        exclude_cols = []
+        if self.datetime_col and self.datetime_col in X.columns:
+            exclude_cols.append(self.datetime_col)
+        if hasattr(self, 'groupby_cols') and self.groupby_cols:
+            exclude_cols.extend([col for col in self.groupby_cols if col in X.columns])
+
+        # Get all potential feature columns
+        all_feature_cols = [col for col in X.columns if col not in exclude_cols]
+
+        # Filter out non-numeric columns
+        numeric_feature_cols = []
+        for col in all_feature_cols:
+            col_dtype = str(X[col].dtype)
+
+            # Skip datetime-like columns
+            if (col_dtype.startswith('datetime') or
+                    col_dtype.startswith('<M8') or
+                    col_dtype.startswith('timedelta')):
+                if self.verbose:
+                    print(f"  Skipping datetime column '{col}' (type: {col_dtype})")
+                continue
+
+            # Check object columns more carefully
+            if col_dtype == 'object':
+                try:
+                    sample_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else None
+                    if sample_val is not None and hasattr(sample_val, 'year'):
+                        # Likely a datetime object
+                        if self.verbose:
+                            print(f"  Skipping datetime-like column '{col}'")
+                        continue
+                except:
+                    pass
+
+            # Test if column is numeric
+            try:
+                test_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else 0
+                float(test_val)
+                numeric_feature_cols.append(col)
+            except (ValueError, TypeError):
+                if self.verbose:
+                    print(f"  Skipping non-numeric column '{col}' (type: {col_dtype})")
+                continue
+
+        return numeric_feature_cols
+
+    def _setup_time_series(self, X, y=None):
+        """
+        Setup time series configuration based on enable_time_series_mode
+        Called at the beginning of fit()
+
+        Parameters:
+        -----------
+        X : array-like or DataFrame
+            Input features
+        y : array-like, optional
+            Target variable
+
+        Returns:
+        --------
+        bool
+            Whether time series should be enabled
+        """
+        mode = self.enable_time_series_mode
+
+        # Case 1: Explicitly disabled
+        if mode == 'no':
+            if self.verbose:
+                print("\n=== Time Series: DISABLED ===")
+            self.enable_time_series = False
+            return False
+
+        # Case 2: Explicitly enabled ('yes')
+        if mode == 'yes':
+            if self.verbose:
+                print("\n=== Time Series: ENABLED (forced) ===")
+
+            # Must have datetime column
+            if self.datetime_col is None:
+                error_msg = "datetime_col must be specified when enable_time_series='yes'"
+                if self.verbose:
+                    print(f"Error: {error_msg}")
+                raise ValueError(error_msg)
+
+            # Get feature columns
+            if isinstance(X, pd.DataFrame):
+                feature_cols = self._identify_feature_columns(X)
+            else:
+                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+
+            # Detect optimal windows using DFT
+            if self.user_provided_windows is None:
+                if self.verbose:
+                    print("\nRunning DFT to detect optimal window sizes...")
+
+                try:
+                    self.dft_detected_windows, self.dft_confidence_scores = \
+                        self.dft_detector.detect_optimal_windows(
+                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                            self.datetime_col,
+                            feature_cols,
+                            sampling_rate=self.time_step
+                        )
+
+                    self.window_sizes = self.dft_detected_windows
+                    self.dft_detection_strategy = 'dft'
+
+                    if self.verbose:
+                        avg_conf = np.mean(
+                            list(self.dft_confidence_scores.values())) if self.dft_confidence_scores else 0.0
+                        print(f"DFT detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
+
+                except Exception as e:
+                    if self.verbose:
+                        print(f"Warning: DFT detection failed: {str(e)}")
+                        print("Falling back to default windows")
+                    self.window_sizes = self._get_default_windows()
+                    self.dft_detection_strategy = 'default'
+                    self.dft_confidence_scores = {}
+            else:
+                # Use user-provided windows
+                self.window_sizes = self._parse_time_periods(self.user_provided_windows)
+                self.dft_detection_strategy = 'user_provided'
+                self.dft_confidence_scores = {}
+                if self.verbose:
+                    print(f"Using {len(self.window_sizes)} user-provided window sizes")
+
+            # Set lag periods
+            if self.user_provided_lags is None and len(self.window_sizes) > 0:
+                # Derive from window sizes
+                self.lag_periods = [
+                    self.window_sizes[0],  # Smallest window
+                    self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                    self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                ]
+            elif self.user_provided_lags is not None:
+                self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+            else:
+                self.lag_periods = [pd.Timedelta(days=1), pd.Timedelta(days=7), pd.Timedelta(days=30)]
+
+            self.enable_time_series = True
+            self._add_time_series_operators()
+            return True
+
+        # Case 3: Auto mode
+        if mode == 'auto':
+            if self.verbose:
+                print("\n=== Time Series: AUTO-DETECTION ===")
+
+            # Step 1: Try to find datetime column
+            if self.datetime_col is None:
+                if isinstance(X, pd.DataFrame):
+                    detected_dt_col = self.dft_detector.detect_datetime_column(X)
+                    if detected_dt_col:
+                        self.datetime_col = detected_dt_col
+                    else:
+                        if self.verbose:
+                            print("No datetime column found → Time series DISABLED")
+                        self.enable_time_series = False
+                        return False
+                else:
+                    if self.verbose:
+                        print("Input is not a DataFrame, cannot auto-detect datetime → Time series DISABLED")
+                    self.enable_time_series = False
+                    return False
+
+            # Step 2: Get feature columns
+            if isinstance(X, pd.DataFrame):
+                feature_cols = self._identify_feature_columns(X)
+            else:
+                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+
+            if len(feature_cols) == 0:
+                if self.verbose:
+                    print("No valid feature columns found → Time series DISABLED")
+                self.enable_time_series = False
+                return False
+
+            # Step 3: Run DFT and assess periodicity
+            if self.verbose:
+                print("\nAssessing periodicity using DFT...")
+
+            try:
+                is_periodic, avg_confidence, feature_confidences = \
+                    self.dft_detector.assess_periodicity(
+                        self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                        self.datetime_col,
+                        feature_cols
+                    )
+
+                # Step 4: Decide based on confidence
+                if is_periodic:
+                    if self.verbose:
+                        print(
+                            f"✓ Periodicity detected (confidence={avg_confidence:.2f} > {self.dft_confidence_threshold})")
+                        print("  → Time series ENABLED with DFT-detected windows")
+
+                    # Use smart window selection
+                    self.window_sizes, self.dft_detection_strategy = \
+                        self.dft_detector.smart_window_selection(
+                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                            self.datetime_col,
+                            feature_cols
+                        )
+
+                    self.dft_detected_windows = self.window_sizes
+                    self.dft_confidence_scores = feature_confidences
+
+                    # Set lag periods
+                    if self.user_provided_lags is None and len(self.window_sizes) > 0:
+                        self.lag_periods = [
+                            self.window_sizes[0],
+                            self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                            self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                        ]
+                    elif self.user_provided_lags is not None:
+                        self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+                    else:
+                        self.lag_periods = [pd.Timedelta(days=1), pd.Timedelta(days=7), pd.Timedelta(days=30)]
+
+                    self.enable_time_series = True
+                    self._add_time_series_operators()
+                    return True
+
+                else:
+                    if self.verbose:
+                        print(f"✗ Weak periodicity (confidence={avg_confidence:.2f} < {self.dft_confidence_threshold})")
+                        print("  → Time series DISABLED")
+
+                    self.enable_time_series = False
+                    self.dft_confidence_scores = feature_confidences
+                    self.dft_detection_strategy = 'disabled_low_confidence'
+                    return False
+
+            except Exception as e:
+                if self.verbose:
+                    print(f"Warning: Periodicity assessment failed: {str(e)}")
+                    print("  → Time series DISABLED")
+
+                self.enable_time_series = False
+                self.dft_confidence_scores = {}
+                self.dft_detection_strategy = 'disabled_error'
+                return False
+
+        return False
+
+    def get_dft_summary(self):
+        """
+        Get summary of DFT detection results
+
+        Returns:
+        --------
+        dict
+            Dictionary containing DFT detection summary
+        """
+        summary = {
+            'mode': self.enable_time_series_mode,
+            'time_series_enabled': self.enable_time_series,
+            'datetime_col': self.datetime_col,
+            'detection_strategy': getattr(self, 'dft_detection_strategy', None),
+            'window_sizes': [w.days for w in self.window_sizes] if self.window_sizes else None,
+            'lag_periods': [l.days for l in self.lag_periods] if self.lag_periods else None,
+            'dft_confidence_scores': getattr(self, 'dft_confidence_scores', {}),
+            'avg_confidence': None
+        }
+
+        if summary['dft_confidence_scores']:
+            summary['avg_confidence'] = np.mean(list(summary['dft_confidence_scores'].values()))
+
+        return summary
+
+    def print_dft_summary(self):
+        """
+        Print a formatted summary of DFT detection results
+        """
+        summary = self.get_dft_summary()
+
+        print("\n" + "=" * 60)
+        print("BigFeat Time Series Configuration Summary")
+        print("=" * 60)
+        print(f"Mode: {summary['mode']}")
+        print(f"Time Series Enabled: {summary['time_series_enabled']}")
+
+        if summary['time_series_enabled']:
+            print(f"Datetime Column: {summary['datetime_col']}")
+            print(f"Detection Strategy: {summary['detection_strategy']}")
+            print(f"\nWindow Sizes (days): {summary['window_sizes']}")
+            print(f"Lag Periods (days): {summary['lag_periods']}")
+
+            if summary['dft_confidence_scores']:
+                print(f"\nDFT Confidence Scores:")
+                for feat, conf in summary['dft_confidence_scores'].items():
+                    status = "STRONG" if conf > 2.0 else "MODERATE" if conf > 1.3 else "WEAK"
+                    print(f"  {feat}: {conf:.2f} ({status})")
+                if summary['avg_confidence']:
+                    print(f"\nAverage Confidence: {summary['avg_confidence']:.2f}")
+                    print(f"Threshold: {self.dft_confidence_threshold}")
+        else:
+            print(f"Reason: {summary['detection_strategy']}")
+
+        print("=" * 60 + "\n")
+
+    def update_ts_weight_multiplier(self, new_multiplier):
+        """
+        Update the time series operation weight multiplier
+
+        Parameters:
+        -----------
+        new_multiplier : float
+            New weight multiplier for time series operations
+        """
+        old_multiplier = self.ts_operation_weight_multiplier
+        self.ts_operation_weight_multiplier = new_multiplier
+
+        if hasattr(self, 'imp_operators') and hasattr(self, 'time_series_operators'):
+            # Update existing weights
+            for i, op in enumerate(self.operators):
+                if op in self.time_series_operators:
+                    # Remove old multiplier and apply new one
+                    self.imp_operators[i] = (self.imp_operators[i] / old_multiplier) * new_multiplier
+
+            # Renormalize
+            self.operator_weights = self.imp_operators / self.imp_operators.sum()
+
+            if self.verbose:
+                print(f"Updated time series weight multiplier from {old_multiplier} to {new_multiplier}")
+
+    def update_window_step_options(self, new_options):
+        """
+        Update the available window step options
+
+        Parameters:
+        -----------
+        new_options : list
+            New list of window step options
+        """
+        self.window_step_options = new_options
+        if self.verbose:
+            print(f"Updated window step options to: {self.window_step_options}")
