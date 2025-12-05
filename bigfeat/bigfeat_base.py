@@ -13,7 +13,6 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import f1_score, make_scorer
-from bigfeat.dft_window_detector import DFTWindowDetector
 from functools import partial
 import warnings
 from datetime import timedelta
@@ -23,6 +22,7 @@ class BigFeat:
     def __init__(self,
                  task_type='classification',
                  enable_time_series='auto',  # 'yes'/'no'/'auto'
+                 window_detector='dft', # 'dft'/'acf'/'lomb_scargle'
                  window_sizes=None,
                  lag_periods=None,
                  verbose=True,
@@ -38,7 +38,7 @@ class BigFeat:
                  dft_max_window_days=365,
                  dft_n_windows=6):
         """
-        Initialize the BigFeat object with enhanced DFT-based window detection
+        Initialize the BigFeat object with configurable window detection
 
         Parameters:
         -----------
@@ -50,6 +50,12 @@ class BigFeat:
             - 'yes': Force enable time series with DFT-detected windows
             - 'no': Disable time series features entirely
             - 'auto': Automatically detect datetime column and assess periodicity
+
+        window_detector : str, default='dft'
+            Window detection method to use:
+            - 'dft': DFT-based detection (default, good for regular data)
+            - 'acf': ACF-based detection (good for short series, robust)
+            - 'lomb_scargle': Lomb-Scargle (good for irregular/missing data)
 
         window_sizes : list of str or pd.Timedelta, optional
             List of time-based window sizes for rolling operations.
@@ -95,7 +101,7 @@ class BigFeat:
         dft_n_windows : int, default=6
             Number of window sizes to generate from DFT analysis
         """
-        # Original initialization
+        # BigFeat initialization
         self.n_jobs = -1
         self.operators = [np.multiply, np.add, np.subtract, np.abs, np.square]
         self.binary_operators = [np.multiply, np.add, np.subtract]
@@ -123,13 +129,15 @@ class BigFeat:
         self.dft_max_window_days = dft_max_window_days
         self.dft_n_windows = dft_n_windows
 
-        # Initialize DFT detector
-        self.dft_detector = DFTWindowDetector(
-            min_window_days=dft_min_window_days,
-            max_window_days=dft_max_window_days,
-            n_windows=dft_n_windows,
-            confidence_threshold=dft_confidence_threshold,
-            verbose=verbose
+        # Initialize the appropriate window detector
+        self.window_detector_type = window_detector
+        self.window_detector = self._initialize_window_detector(
+            window_detector,
+            dft_min_window_days,
+            dft_max_window_days,
+            dft_n_windows,
+            dft_confidence_threshold,
+            verbose
         )
 
         # Time series parameters
@@ -158,9 +166,9 @@ class BigFeat:
         self.feature_columns = None
 
         # Tracking variables for DFT results
-        self.dft_detected_windows = None
-        self.dft_confidence_scores = None
-        self.dft_detection_strategy = None
+        self.detected_windows = None
+        self.confidence_scores = None
+        self.detection_strategy = None
 
         # Validate task_type input
         if task_type not in ['classification', 'regression']:
@@ -168,12 +176,59 @@ class BigFeat:
 
         if self.verbose:
             print(f"BigFeat initialized with enable_time_series='{enable_time_series}'")
+            print(f"  Window detector: {window_detector}")
             if enable_time_series == 'yes':
                 print("  → Time series features will be generated using DFT-detected windows")
             elif enable_time_series == 'auto':
                 print("  → Time series will be auto-detected based on datetime column and periodicity")
             else:
                 print("  → Time series features disabled")
+
+    def _initialize_window_detector(self, detector_type, min_window_days,
+                                    max_window_days, n_windows,
+                                    confidence_threshold, verbose):
+        """
+        Initialize the appropriate window detector based on type
+
+        Parameters:
+        -----------
+        detector_type : str
+            Type of detector: 'dft', 'acf', or 'lomb_scargle'
+
+        Returns:
+        --------
+        detector instance with standardized interface
+        """
+        if detector_type == 'dft':
+            from bigfeat.dft_window_detector import DFTWindowDetector
+            return DFTWindowDetector(
+                min_window_days=min_window_days,
+                max_window_days=max_window_days,
+                n_windows=n_windows,
+                confidence_threshold=confidence_threshold,
+                verbose=verbose
+            )
+        elif detector_type == 'acf':
+            from bigfeat.acf_window_detector import ACFWindowDetector
+            return ACFWindowDetector(
+                min_window_days=min_window_days,
+                max_window_days=max_window_days,
+                n_windows=n_windows,
+                confidence_threshold=confidence_threshold,
+                verbose=verbose
+            )
+        elif detector_type == 'lomb_scargle':
+            from bigfeat.lomb_scargle_window_detector import LombScargleWindowDetector
+            return LombScargleWindowDetector(
+                min_window_days=min_window_days,
+                max_window_days=max_window_days,
+                n_windows=n_windows,
+                confidence_threshold=confidence_threshold,
+                verbose=verbose
+            )
+        else:
+            raise ValueError(f"Unknown window_detector: {detector_type}. "
+                             f"Must be 'dft', 'acf', or 'lomb_scargle'")
 
     def _setup_time_series(self, X, y=None):
         """
@@ -221,34 +276,34 @@ class BigFeat:
             # Detect optimal windows using DFT
             if self.user_provided_windows is None:
                 if self.verbose:
-                    print("\nRunning DFT to detect optimal window sizes...")
+                    print(f"\nRunning {self.window_detector_type.upper()} to detect optimal window sizes...")
 
                 try:
-                    self.dft_detected_windows, self.dft_confidence_scores = \
-                        self.dft_detector.detect_optimal_windows(
+                    self.detected_windows, self.confidence_scores = \
+                        self.window_detector.detect_optimal_windows(
                             self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                             self.datetime_col,
                             feature_cols,
                             sampling_rate=self.time_step
                         )
 
-                    self.window_sizes = self.dft_detected_windows
-                    self.dft_detection_strategy = 'dft'
+                    self.window_sizes = self.detected_windows
+                    self.detection_strategy = 'dft'
 
                     if self.verbose:
-                        avg_conf = np.mean(list(self.dft_confidence_scores.values()))
-                        print(f"DFT detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
+                        avg_conf = np.mean(list(self.confidence_scores.values()))
+                        print(f"{self.window_detector_type.upper()} detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
 
                 except Exception as e:
                     if self.verbose:
                         print(f"Warning: DFT detection failed: {str(e)}")
                         print("Falling back to default windows")
                     self.window_sizes = self._get_default_windows()
-                    self.dft_detection_strategy = 'default'
+                    self.detection_strategy = 'default'
             else:
                 # Use user-provided windows
                 self.window_sizes = self._parse_time_periods(self.user_provided_windows)
-                self.dft_detection_strategy = 'user_provided'
+                self.detection_strategy = 'user_provided'
                 if self.verbose:
                     print(f"Using {len(self.window_sizes)} user-provided window sizes")
 
@@ -275,7 +330,7 @@ class BigFeat:
             # Step 1: Try to find datetime column
             if self.datetime_col is None:
                 if isinstance(X, pd.DataFrame):
-                    detected_dt_col = self.dft_detector.detect_datetime_column(X)
+                    detected_dt_col = self.window_detector.detect_datetime_column(X)
                     if detected_dt_col:
                         self.datetime_col = detected_dt_col
                     else:
@@ -297,11 +352,11 @@ class BigFeat:
 
             # Step 3: Run DFT and assess periodicity
             if self.verbose:
-                print("\nAssessing periodicity using DFT...")
+                print(f"\nAssessing periodicity using {self.window_detector_type.upper()}...")
 
             try:
                 is_periodic, avg_confidence, feature_confidences = \
-                    self.dft_detector.assess_periodicity(
+                    self.window_detector.assess_periodicity(
                         self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                         self.datetime_col,
                         feature_cols
@@ -312,17 +367,17 @@ class BigFeat:
                     if self.verbose:
                         print(
                             f"✓ Periodicity detected (confidence={avg_confidence:.2f} > {self.dft_confidence_threshold})")
-                        print("  → Time series ENABLED with DFT-detected windows")
+                        print(f"  → Time series ENABLED with {self.window_detector_type.upper()}-detected windows")
                     # Use smart window selection
-                    self.window_sizes, self.dft_detection_strategy = \
-                        self.dft_detector.smart_window_selection(
+                    self.window_sizes, self.detection_strategy = \
+                        self.window_detector.smart_window_selection(
                             self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                             self.datetime_col,
                             feature_cols
                         )
 
-                    self.dft_detected_windows = self.window_sizes
-                    self.dft_confidence_scores = feature_confidences
+                    self.detected_windows = self.window_sizes
+                    self.confidence_scores = feature_confidences
 
                     # Set lag periods
                     if self.user_provided_lags is None:
@@ -1234,8 +1289,8 @@ class BigFeat:
             print("=" * 60 + "\n")
 
             # Print DFT summary if time series was used
-            if self.enable_time_series and self.dft_detection_strategy:
-                self.print_dft_summary()
+            if self.enable_time_series and self.detection_strategy:
+                self.print_window_detection_summary()
 
         return gen_feats
 
@@ -1724,241 +1779,42 @@ class BigFeat:
 
         return numeric_feature_cols
 
-    def _setup_time_series(self, X, y=None):
+    def get_window_detection_summary(self):
         """
-        Setup time series configuration based on enable_time_series_mode
-        Called at the beginning of fit()
-
-        Parameters:
-        -----------
-        X : array-like or DataFrame
-            Input features
-        y : array-like, optional
-            Target variable
-
-        Returns:
-        --------
-        bool
-            Whether time series should be enabled
-        """
-        mode = self.enable_time_series_mode
-
-        # Case 1: Explicitly disabled
-        if mode == 'no':
-            if self.verbose:
-                print("\n=== Time Series: DISABLED ===")
-            self.enable_time_series = False
-            return False
-
-        # Case 2: Explicitly enabled ('yes')
-        if mode == 'yes':
-            if self.verbose:
-                print("\n=== Time Series: ENABLED (forced) ===")
-
-            # Must have datetime column
-            if self.datetime_col is None:
-                error_msg = "datetime_col must be specified when enable_time_series='yes'"
-                if self.verbose:
-                    print(f"Error: {error_msg}")
-                raise ValueError(error_msg)
-
-            # Get feature columns
-            if isinstance(X, pd.DataFrame):
-                feature_cols = self._identify_feature_columns(X)
-            else:
-                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
-
-            # Detect optimal windows using DFT
-            if self.user_provided_windows is None:
-                if self.verbose:
-                    print("\nRunning DFT to detect optimal window sizes...")
-
-                try:
-                    self.dft_detected_windows, self.dft_confidence_scores = \
-                        self.dft_detector.detect_optimal_windows(
-                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
-                            self.datetime_col,
-                            feature_cols,
-                            sampling_rate=self.time_step
-                        )
-
-                    self.window_sizes = self.dft_detected_windows
-                    self.dft_detection_strategy = 'dft'
-
-                    if self.verbose:
-                        avg_conf = np.mean(
-                            list(self.dft_confidence_scores.values())) if self.dft_confidence_scores else 0.0
-                        print(f"DFT detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
-
-                except Exception as e:
-                    if self.verbose:
-                        print(f"Warning: DFT detection failed: {str(e)}")
-                        print("Falling back to default windows")
-                    self.window_sizes = self._get_default_windows()
-                    self.dft_detection_strategy = 'default'
-                    self.dft_confidence_scores = {}
-            else:
-                # Use user-provided windows
-                self.window_sizes = self._parse_time_periods(self.user_provided_windows)
-                self.dft_detection_strategy = 'user_provided'
-                self.dft_confidence_scores = {}
-                if self.verbose:
-                    print(f"Using {len(self.window_sizes)} user-provided window sizes")
-
-            # Set lag periods
-            if self.user_provided_lags is None and len(self.window_sizes) > 0:
-                # Derive from window sizes
-                self.lag_periods = [
-                    self.window_sizes[0],  # Smallest window
-                    self.window_sizes[min(1, len(self.window_sizes) - 1)],
-                    self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
-                ]
-            elif self.user_provided_lags is not None:
-                self.lag_periods = self._parse_time_periods(self.user_provided_lags)
-            else:
-                self.lag_periods = [pd.Timedelta(days=1), pd.Timedelta(days=7), pd.Timedelta(days=30)]
-
-            self.enable_time_series = True
-            self._add_time_series_operators()
-            return True
-
-        # Case 3: Auto mode
-        if mode == 'auto':
-            if self.verbose:
-                print("\n=== Time Series: AUTO-DETECTION ===")
-
-            # Step 1: Try to find datetime column
-            if self.datetime_col is None:
-                if isinstance(X, pd.DataFrame):
-                    detected_dt_col = self.dft_detector.detect_datetime_column(X)
-                    if detected_dt_col:
-                        self.datetime_col = detected_dt_col
-                    else:
-                        if self.verbose:
-                            print("No datetime column found → Time series DISABLED")
-                        self.enable_time_series = False
-                        return False
-                else:
-                    if self.verbose:
-                        print("Input is not a DataFrame, cannot auto-detect datetime → Time series DISABLED")
-                    self.enable_time_series = False
-                    return False
-
-            # Step 2: Get feature columns
-            if isinstance(X, pd.DataFrame):
-                feature_cols = self._identify_feature_columns(X)
-            else:
-                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
-
-            if len(feature_cols) == 0:
-                if self.verbose:
-                    print("No valid feature columns found → Time series DISABLED")
-                self.enable_time_series = False
-                return False
-
-            # Step 3: Run DFT and assess periodicity
-            if self.verbose:
-                print("\nAssessing periodicity using DFT...")
-
-            try:
-                is_periodic, avg_confidence, feature_confidences = \
-                    self.dft_detector.assess_periodicity(
-                        self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
-                        self.datetime_col,
-                        feature_cols
-                    )
-
-                # Step 4: Decide based on confidence
-                if is_periodic:
-                    if self.verbose:
-                        print(
-                            f"✓ Periodicity detected (confidence={avg_confidence:.2f} > {self.dft_confidence_threshold})")
-                        print("  → Time series ENABLED with DFT-detected windows")
-
-                    # Use smart window selection
-                    self.window_sizes, self.dft_detection_strategy = \
-                        self.dft_detector.smart_window_selection(
-                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
-                            self.datetime_col,
-                            feature_cols
-                        )
-
-                    self.dft_detected_windows = self.window_sizes
-                    self.dft_confidence_scores = feature_confidences
-
-                    # Set lag periods
-                    if self.user_provided_lags is None and len(self.window_sizes) > 0:
-                        self.lag_periods = [
-                            self.window_sizes[0],
-                            self.window_sizes[min(1, len(self.window_sizes) - 1)],
-                            self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
-                        ]
-                    elif self.user_provided_lags is not None:
-                        self.lag_periods = self._parse_time_periods(self.user_provided_lags)
-                    else:
-                        self.lag_periods = [pd.Timedelta(days=1), pd.Timedelta(days=7), pd.Timedelta(days=30)]
-
-                    self.enable_time_series = True
-                    self._add_time_series_operators()
-                    return True
-
-                else:
-                    if self.verbose:
-                        print(f"✗ Weak periodicity (confidence={avg_confidence:.2f} < {self.dft_confidence_threshold})")
-                        print("  → Time series DISABLED")
-
-                    self.enable_time_series = False
-                    self.dft_confidence_scores = feature_confidences
-                    self.dft_detection_strategy = 'disabled_low_confidence'
-                    return False
-
-            except Exception as e:
-                if self.verbose:
-                    print(f"Warning: Periodicity assessment failed: {str(e)}")
-                    print("  → Time series DISABLED")
-
-                self.enable_time_series = False
-                self.dft_confidence_scores = {}
-                self.dft_detection_strategy = 'disabled_error'
-                return False
-
-        return False
-
-    def get_dft_summary(self):
-        """
-        Get summary of DFT detection results
+        Get summary of window detection results
 
         Returns:
         --------
         dict
-            Dictionary containing DFT detection summary
+            Dictionary containing window detection summary
         """
         summary = {
             'mode': self.enable_time_series_mode,
             'time_series_enabled': self.enable_time_series,
             'datetime_col': self.datetime_col,
-            'detection_strategy': getattr(self, 'dft_detection_strategy', None),
+            'detection_strategy': getattr(self, 'detection_strategy', None),
             'window_sizes': [w.days for w in self.window_sizes] if self.window_sizes else None,
             'lag_periods': [l.days for l in self.lag_periods] if self.lag_periods else None,
-            'dft_confidence_scores': getattr(self, 'dft_confidence_scores', {}),
+            'confidence_scores': getattr(self, 'confidence_scores', {}),
             'avg_confidence': None
         }
 
-        if summary['dft_confidence_scores']:
-            summary['avg_confidence'] = np.mean(list(summary['dft_confidence_scores'].values()))
+        if summary['confidence_scores']:
+            summary['avg_confidence'] = np.mean(list(summary['confidence_scores'].values()))
 
         return summary
 
-    def print_dft_summary(self):
+    def print_window_detection_summary(self):
         """
-        Print a formatted summary of DFT detection results
+        Print a formatted summary of window detection results
         """
-        summary = self.get_dft_summary()
+        summary = self.get_window_detection_summary()
 
         print("\n" + "=" * 60)
         print("BigFeat Time Series Configuration Summary")
         print("=" * 60)
         print(f"Mode: {summary['mode']}")
+        print(f"Window Detector: {self.window_detector_type.upper()}")
         print(f"Time Series Enabled: {summary['time_series_enabled']}")
 
         if summary['time_series_enabled']:
@@ -1967,9 +1823,9 @@ class BigFeat:
             print(f"\nWindow Sizes (days): {summary['window_sizes']}")
             print(f"Lag Periods (days): {summary['lag_periods']}")
 
-            if summary['dft_confidence_scores']:
-                print(f"\nDFT Confidence Scores:")
-                for feat, conf in summary['dft_confidence_scores'].items():
+            if summary['confidence_scores']:
+                print(f"\nConfidence Scores:")
+                for feat, conf in summary['confidence_scores'].items():
                     status = "STRONG" if conf > 2.0 else "MODERATE" if conf > 1.3 else "WEAK"
                     print(f"  {feat}: {conf:.2f} ({status})")
                 if summary['avg_confidence']:
@@ -1979,41 +1835,3 @@ class BigFeat:
             print(f"Reason: {summary['detection_strategy']}")
 
         print("=" * 60 + "\n")
-
-    def update_ts_weight_multiplier(self, new_multiplier):
-        """
-        Update the time series operation weight multiplier
-
-        Parameters:
-        -----------
-        new_multiplier : float
-            New weight multiplier for time series operations
-        """
-        old_multiplier = self.ts_operation_weight_multiplier
-        self.ts_operation_weight_multiplier = new_multiplier
-
-        if hasattr(self, 'imp_operators') and hasattr(self, 'time_series_operators'):
-            # Update existing weights
-            for i, op in enumerate(self.operators):
-                if op in self.time_series_operators:
-                    # Remove old multiplier and apply new one
-                    self.imp_operators[i] = (self.imp_operators[i] / old_multiplier) * new_multiplier
-
-            # Renormalize
-            self.operator_weights = self.imp_operators / self.imp_operators.sum()
-
-            if self.verbose:
-                print(f"Updated time series weight multiplier from {old_multiplier} to {new_multiplier}")
-
-    def update_window_step_options(self, new_options):
-        """
-        Update the available window step options
-
-        Parameters:
-        -----------
-        new_options : list
-            New list of window step options
-        """
-        self.window_step_options = new_options
-        if self.verbose:
-            print(f"Updated window step options to: {self.window_step_options}")

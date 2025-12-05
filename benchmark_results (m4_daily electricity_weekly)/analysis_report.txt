@@ -1,0 +1,67 @@
+================================================================================
+BIGFEAT BENCHMARK ANALYSIS REPORT
+================================================================================
+
+1. MASE PERFORMANCE SUMMARY
+--------------------------------------------------
+
+baseline:
+  Mean: 1.5177
+  Median: 1.5177
+  Std: 0.4155
+  Range: [1.2239, 1.8114]
+
+auto_dft:
+  Mean: 1.5055
+  Median: 1.5055
+  Std: 0.0793
+  Range: [1.4495, 1.5616]
+
+auto_acf:
+  Mean: 1.4731
+  Median: 1.4731
+  Std: 0.0738
+  Range: [1.4210, 1.5253]
+
+auto_lomb_scargle:
+  Mean: 1.4119
+  Median: 1.4119
+  Std: nan
+  Range: [1.4119, 1.4119]
+
+yes_dft:
+  Mean: 1.3531
+  Median: 1.3531
+  Std: nan
+  Range: [1.3531, 1.3531]
+
+yes_acf:
+  Mean: 1.3126
+  Median: 1.3126
+  Std: nan
+  Range: [1.3126, 1.3126]
+
+yes_lomb_scargle:
+  Mean: 1.3710
+  Median: 1.3710
+  Std: nan
+  Range: [1.3710, 1.3710]
+
+no_dft:
+  Mean: 1.5243
+  Median: 1.5243
+  Std: 0.0248
+  Range: [1.5068, 1.5419]
+
+
+2. BEST CONFIGURATION PER DATASET
+--------------------------------------------------
+           dataset best_config  best_mase
+          m4_daily    baseline   1.223869
+electricity_weekly     yes_acf   1.312551
+
+3. CONFIGURATION RANKINGS
+--------------------------------------------------
+best_config
+baseline    1
+yes_acf     1
