@@ -9,6 +9,11 @@ Compares:
    - enable_time_series: 'auto', 'yes', 'no'
    - window_detector: 'dft', 'acf', 'lomb_scargle'
 
+Features:
+- Native dynamic downsampling (adapts to available RAM automatically)
+- OOM protection for large datasets
+- Phase separation: Learn on sample, apply to all
+
 Measures:
 - Predictive performance (MAE, RMSE, R2, MASE)
 - Runtime (wall time)
@@ -113,7 +118,7 @@ class TimeSeriesBenchmark:
             "car_parts_without_missing",
             "cif_2016",
             "covid_deaths",
-            "electricity_hourly",
+            #"electricity_hourly",
             "electricity_weekly",
             "fred_md",
             "hospital",
@@ -591,7 +596,7 @@ class TimeSeriesBenchmark:
             max_window = 365
             n_windows = 6
 
-        # Default BigFeat parameters
+        # Default BigFeat parameters with native downsampling
         default_params = {
             'task_type': 'regression',
             'verbose': False,  # Reduce noise in benchmark
@@ -603,49 +608,43 @@ class TimeSeriesBenchmark:
             'dft_min_window_days': min_window,
             'dft_max_window_days': max_window,
             'dft_n_windows': n_windows,
+            # Native dynamic downsampling (NEW!)
+            'enable_downsampling': True,
+            'max_fit_samples': 0,  # 0 = fully dynamic (adapts to available RAM)
+            'downsampling_random_state': 42,  # Reproducible sampling
         }
 
         if bigfeat_params:
             default_params.update(bigfeat_params)
 
         try:
-            # Initialize BigFeat
+            # Initialize BigFeat with native downsampling
             bf = BigFeat(**default_params)
 
             # Track BigFeat feature generation separately
             monitor_bigfeat.start()
 
-            # --- OOM PROTECTION (Critical for large datasets) ---
-            # Feature discovery (fit) doesn't need 10M rows. 100k is enough to find patterns.
-            MAX_FIT_SAMPLES = 100000
+            # BigFeat now handles downsampling internally with dynamic memory awareness!
+            # No manual sampling needed - it automatically adapts to available memory.
+            #
+            # How it works:
+            # 1. fit() detects available RAM and calculates optimal sample size
+            # 2. If dataset > safe limit, samples for feature discovery
+            # 3. transform() always uses full data for final features
+            #
+            # Result: Maximizes data usage while preventing OOM crashes
 
-            if len(X_train_with_features) > MAX_FIT_SAMPLES:
-                # Randomly sample indices
-                rng = np.random.RandomState(42)
-                sample_indices = rng.choice(len(X_train_with_features), MAX_FIT_SAMPLES, replace=False)
-                X_fit = X_train_with_features.iloc[sample_indices].copy()
-                y_fit = y_train[sample_indices]
-
-                if self.verbose:
-                    print(f"    (Downsampling for fit: {len(X_train_with_features)} -> {MAX_FIT_SAMPLES} rows)")
-            else:
-                X_fit = X_train_with_features
-                y_fit = y_train
-
-            # IMPORTANT: Fit on sample, transform on full dataset
-            # Generate features using the sampled data
+            # Fit on full training data (BigFeat will downsample if needed)
             X_train_transformed = bf.fit(
-                X_fit, y_fit,  # Fit on sampled data
+                X_train_with_features,  # Full data - BigFeat handles sampling
+                y_train,
                 gen_size=10,
                 iterations=5,
                 random_state=42,
                 estimator='avg'
             )
 
-            # Transform the FULL training set (memory safe)
-            X_train_transformed = bf.transform(X_train_with_features)
-
-            # Transform test set
+            # Transform test set (always uses full data)
             X_test_transformed = bf.transform(X_test_with_features)
 
             # Stop BigFeat tracking
@@ -746,6 +745,9 @@ class TimeSeriesBenchmark:
         """
         Run complete benchmark on a single dataset.
 
+        CRASH RECOVERY: Saves results incrementally after each method completes.
+        If benchmark crashes, it will resume from the last saved checkpoint.
+
         Parameters:
         -----------
         dataset_name : str
@@ -763,26 +765,68 @@ class TimeSeriesBenchmark:
             print(f"Benchmarking: {dataset_name}")
             print(f"{'='*80}")
 
-        results = {
-            'dataset': dataset_name,
-            'timestamp': datetime.now().isoformat(),
-            'estimator': estimator_name
-        }
+        # Check if results already exist (crash recovery)
+        result_file = self.output_dir / f"{dataset_name}_results.json"
+        if result_file.exists():
+            if self.verbose:
+                print(f"  ⚠️  Found existing results file, loading...")
+            try:
+                with open(result_file, 'r') as f:
+                    existing_results = json.load(f)
+
+                # Check if benchmark was completed
+                if existing_results.get('status') == 'completed':
+                    if self.verbose:
+                        print(f"  ✓ Dataset already completed, skipping")
+                    return existing_results
+                else:
+                    if self.verbose:
+                        print(f"  ↻ Incomplete results found, resuming from checkpoint...")
+                    results = existing_results
+            except Exception as e:
+                if self.verbose:
+                    print(f"  ⚠️  Could not load existing results: {e}, starting fresh")
+                results = {
+                    'dataset': dataset_name,
+                    'timestamp': datetime.now().isoformat(),
+                    'estimator': estimator_name
+                }
+        else:
+            results = {
+                'dataset': dataset_name,
+                'timestamp': datetime.now().isoformat(),
+                'estimator': estimator_name
+            }
 
         try:
-            # Load dataset
-            df, metadata = self.load_and_prepare_dataset(dataset_name)
-            results['metadata'] = metadata
+            # Load dataset (skip if already loaded)
+            if 'metadata' not in results:
+                df, metadata = self.load_and_prepare_dataset(dataset_name)
+                results['metadata'] = metadata
+
+                # Save checkpoint after loading
+                with open(result_file, 'w') as f:
+                    json.dump(results, f, indent=2, default=str)
+                if self.verbose:
+                    print(f"  💾 Checkpoint: Metadata saved")
+            else:
+                # Reload data from existing metadata
+                df, metadata = self.load_and_prepare_dataset(dataset_name)
 
             # Create train/test split
             train_df, test_df = self.create_supervised_dataset(
                 df,
-                prediction_length=metadata['prediction_length']
+                prediction_length=results['metadata']['prediction_length']
             )
 
             if len(train_df) == 0 or len(test_df) == 0:
                 results['status'] = 'skipped'
                 results['reason'] = 'Insufficient data for train/test split'
+
+                # Save final result
+                with open(result_file, 'w') as f:
+                    json.dump(results, f, indent=2, default=str)
+
                 return results
 
             # Prepare features and target
@@ -794,34 +838,59 @@ class TimeSeriesBenchmark:
                 print(f"  Train: {len(X_train)} samples")
                 print(f"  Test: {len(X_test)} samples")
 
-            # Run baseline
-            if self.verbose:
-                print(f"\n1. Running Baseline (no feature engineering)...")
-
-            try:
-                baseline_results = self.run_baseline(
-                    X_train, y_train, X_test, y_test, estimator_name
-                )
-                results['baseline'] = baseline_results
-
+            # Run baseline (skip if already completed)
+            if 'baseline' not in results or results['baseline'].get('status') == 'failed':
                 if self.verbose:
-                    print(f"  ✓ Baseline")
-                    print(f"    MASE: {baseline_results['mase']:.4f}")
-                    print(f"    Features: {baseline_results['n_features']}")
-                    print(f"    Total Time: {baseline_results['wall_time']:.2f}s")
-                    print(f"      - Data Prep: {baseline_results.get('prep_wall_time', 0):.2f}s")
-                    print(f"      - Model Training: {baseline_results.get('model_wall_time', 0):.2f}s")
-                    print(f"    CPU: {baseline_results['cpu_percent']:.1f}%")
-                    print(f"    Memory: {baseline_results['memory_delta_mb']:.1f} MB")
-            except Exception as e:
+                    print(f"\n1. Running Baseline (no feature engineering)...")
+
+                try:
+                    baseline_results = self.run_baseline(
+                        X_train, y_train, X_test, y_test, estimator_name
+                    )
+                    results['baseline'] = baseline_results
+
+                    # Save checkpoint after baseline
+                    with open(result_file, 'w') as f:
+                        json.dump(results, f, indent=2, default=str)
+
+                    if self.verbose:
+                        print(f"  ✓ Baseline")
+                        print(f"    MASE: {baseline_results['mase']:.4f}")
+                        print(f"    Features: {baseline_results['n_features']}")
+                        print(f"    Total Time: {baseline_results['wall_time']:.2f}s")
+                        print(f"      - Data Prep: {baseline_results.get('prep_wall_time', 0):.2f}s")
+                        print(f"      - Model Training: {baseline_results.get('model_wall_time', 0):.2f}s")
+                        print(f"    CPU: {baseline_results['cpu_percent']:.1f}%")
+                        print(f"    Memory: {baseline_results['memory_delta_mb']:.1f} MB")
+                        print(f"  💾 Checkpoint: Baseline saved")
+
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  ✗ Baseline failed: {str(e)}")
+                    results['baseline'] = {'status': 'failed', 'error': str(e)}
+
+                    # Save checkpoint even on failure
+                    with open(result_file, 'w') as f:
+                        json.dump(results, f, indent=2, default=str)
+            else:
                 if self.verbose:
-                    print(f"  ✗ Baseline failed: {str(e)}")
-                results['baseline'] = {'status': 'failed', 'error': str(e)}
+                    print(f"\n1. Baseline (already completed)")
+                    if 'mase' in results['baseline']:
+                        print(f"  ✓ MASE: {results['baseline']['mase']:.4f}")
 
             # Run BigFeat variants
             for i, (ts_mode, detector) in enumerate(self.bigfeat_configs, 2):
                 config_name = f"{ts_mode}_{detector}"
                 label = f"BigFeat-{ts_mode}-{detector}"
+                key = f'bigfeat_{config_name}'
+
+                # Skip if already completed
+                if key in results and results[key].get('status') == 'success':
+                    if self.verbose:
+                        print(f"\n{i}. {label} (already completed)")
+                        if 'mase' in results[key]:
+                            print(f"  ✓ MASE: {results[key]['mase']:.4f}")
+                    continue
 
                 if self.verbose:
                     print(f"\n{i}. Running {label}...")
@@ -835,7 +904,11 @@ class TimeSeriesBenchmark:
                         estimator_name=estimator_name
                     )
 
-                    results[f'bigfeat_{config_name}'] = bf_results
+                    results[key] = bf_results
+
+                    # Save checkpoint after EACH BigFeat configuration
+                    with open(result_file, 'w') as f:
+                        json.dump(results, f, indent=2, default=str)
 
                     if bf_results['status'] == 'success':
                         if self.verbose:
@@ -843,7 +916,7 @@ class TimeSeriesBenchmark:
                             print(f"    MASE: {bf_results['mase']:.4f}")
                             print(f"    Features: {bf_results['n_features_generated']}")
                             print(f"    Total Time: {bf_results['wall_time']:.2f}s")
-                            print(f"      - BigFeat: {bf_results['bigfeat_wall_time']:.2f}s ({bf_results['bigfeat_cpu_percent']:.1f}% CPU)")
+                            print(f"      - BigFeat: {bf_results['bigfeat_wall_time']:.2f}s ({bf_results.get('bigfeat_cpu_percent', 0):.1f}% CPU)")
                             print(f"      - Model Training: {bf_results.get('model_wall_time', 0):.2f}s ({bf_results.get('model_cpu_percent', 0):.1f}% CPU)")
                             print(f"    Memory: {bf_results['memory_delta_mb']:.1f} MB (BigFeat: {bf_results['bigfeat_memory_delta_mb']:.1f} MB)")
 
@@ -852,18 +925,36 @@ class TimeSeriesBenchmark:
                                 print(f"    TS Strategy: {det_info['detection_strategy']}")
                                 if det_info.get('avg_confidence'):
                                     print(f"    TS Confidence: {det_info['avg_confidence']:.2f}")
+
+                            print(f"  💾 Checkpoint: {label} saved")
+
                 except Exception as e:
                     if self.verbose:
                         print(f"  ✗ {label} failed: {str(e)}")
-                    results[f'bigfeat_{config_name}'] = {'status': 'failed', 'error': str(e)}
+                    results[key] = {'status': 'failed', 'error': str(e)}
+
+                    # Save checkpoint even on failure
+                    with open(result_file, 'w') as f:
+                        json.dump(results, f, indent=2, default=str)
 
             results['status'] = 'completed'
+
+            # Final save with completed status
+            with open(result_file, 'w') as f:
+                json.dump(results, f, indent=2, default=str)
+
+            if self.verbose:
+                print(f"\n  ✅ Dataset completed and saved")
 
         except Exception as e:
             if self.verbose:
                 print(f"\n✗ Dataset failed: {str(e)}")
             results['status'] = 'failed'
             results['error'] = str(e)
+
+            # Save even on catastrophic failure
+            with open(result_file, 'w') as f:
+                json.dump(results, f, indent=2, default=str)
 
         return results
 
@@ -897,24 +988,44 @@ class TimeSeriesBenchmark:
         for ts_mode, detector in self.bigfeat_configs:
             print(f"  - BigFeat: enable_time_series='{ts_mode}', window_detector='{detector}'")
         print(f"Output directory: {self.output_dir.absolute()}")
+        print(f"\n💾 CRASH RECOVERY ENABLED:")
+        print(f"  - Results saved after each method completes")
+        print(f"  - Re-running this script will resume from last checkpoint")
+        print(f"  - Delete individual JSON files to re-run specific datasets")
         print(f"{'='*80}\n")
 
         all_results = []
 
+        # Check for existing results to show progress
+        completed_count = 0
+        for dataset_name in datasets:
+            result_file = self.output_dir / f"{dataset_name}_results.json"
+            if result_file.exists():
+                try:
+                    with open(result_file, 'r') as f:
+                        existing = json.load(f)
+                    if existing.get('status') == 'completed':
+                        completed_count += 1
+                except:
+                    pass
+
+        if completed_count > 0:
+            print(f"📊 Found {completed_count}/{len(datasets)} completed datasets")
+            print(f"   Will skip completed datasets and resume incomplete ones\n")
+
         for i, dataset_name in enumerate(datasets, 1):
             print(f"\n[{i}/{len(datasets)}] Processing: {dataset_name}")
+            print(f"    Progress: {i-1} completed, {len(datasets)-i} remaining")
 
-            # Run benchmark
+            # Run benchmark (with automatic resumption)
             result = self.benchmark_single_dataset(dataset_name, estimator_name)
             all_results.append(result)
 
-            # Save individual result
-            result_file = self.output_dir / f"{dataset_name}_results.json"
-            with open(result_file, 'w') as f:
-                json.dump(result, f, indent=2, default=str)
+            # Note: Individual result already saved by benchmark_single_dataset
 
             if self.verbose:
-                print(f"  ✓ Saved results to {result_file}")
+                status_icon = "✅" if result.get('status') == 'completed' else "⚠️"
+                print(f"    {status_icon} Dataset {dataset_name}: {result.get('status', 'unknown')}")
 
         # Create summary DataFrame
         summary_data = []

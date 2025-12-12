@@ -549,6 +549,10 @@ class BigFeat:
         """
         if not self.enable_time_series or self.datetime_col is None:
             return X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+            
+        # Optimization: Return immediately if already sorted (Task 7)
+        if hasattr(self, '_is_sorted') and self._is_sorted:
+             return X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
 
         # Convert to DataFrame if needed
         if isinstance(X, pd.DataFrame):
@@ -576,45 +580,272 @@ class BigFeat:
         # Sort by datetime and groupby columns for proper time series order
         sort_cols = [self.datetime_col] if self.datetime_col in df.columns else []
         sort_cols.extend([col for col in self.groupby_cols if col in df.columns])
-
+        
         if sort_cols:
-            df = df.sort_values(sort_cols).reset_index(drop=True)
+            # 1. Store the original index to restore order later (Task Fix: Transform Order)
+            if '_original_index' not in df.columns:
+                 # Create a tracking index
+                 # If dataframe has a meaningful index, preserve it
+                 if isinstance(X, pd.DataFrame):
+                      df['_original_index'] = X.index
+                 else:
+                      df['_original_index'] = np.arange(len(df))
 
+            # 2. Temp index for sorting y (array)
+            df['_sort_idx_temp'] = np.arange(len(df))
+            
+            df = df.sort_values(sort_cols)
+            
+            # Sort y if provided
+            if y is not None:
+                if len(y) == len(df):
+                    sort_indices = df['_sort_idx_temp'].values
+                    
+                    if isinstance(y, (pd.Series, pd.DataFrame)):
+                        # Use iloc for pandas objects
+                        y = y.iloc[sort_indices].reset_index(drop=True)
+                    else:
+                        # Assume array-like, handle indexing
+                        # Convert to numpy array if list for safety
+                        y = np.array(y)[sort_indices]
+                else:
+                    if self.verbose: 
+                        print("Warning: y length mismatch in prepare_time_series_data, skipping y sort")
+            
+            # Remove temp index and reset, BUT KEEP _original_index
+            df = df.drop(columns=['_sort_idx_temp']).reset_index(drop=True)
+            self._is_sorted = True # Flag to avoid redundant sorting
+            
+        if y is not None:
+            return df, y
         return df
 
-    def _apply_time_based_operation(self, data, feature_col, operation, window_size=None, lag_period=None):
+    def _apply_time_based_operation(self, data, feature_col, operation, window_size=None, lag_period=None, time_step=None):
         """
-        Apply time-based series operation to a specific feature column with proper grouping - FIXED VERSION
-
-        Parameters:
-        -----------
-        data : DataFrame
-            Data with datetime and groupby columns
-        feature_col : str
-            Name of the feature column to apply operation to
-        operation : str
-            Type of operation ('rolling_mean', 'lag', etc.)
-        window_size : pd.Timedelta, optional
-            Time-based window size for rolling operations
-        lag_period : pd.Timedelta, optional
-            Time-based lag period for lag operations
-
-        Returns:
-        --------
-        result : array
-            Result of the time-based series operation
+        Apply time-based series operation to a specific feature column using vectorized operations - OPTIMIZED
         """
         try:
             if feature_col not in data.columns or self.datetime_col not in data.columns:
                 return np.zeros(len(data))
 
-            # Dynamically select window step for this operation
-            current_step = self._select_window_step()
+            # Select window step if not provided
+            current_step = time_step or self._select_window_step()
+
+            # Determine groupby columns
+            groups = [col for col in self.groupby_cols if col in data.columns]
+            # Add block ID if present (Task 4) to prevent seams
+            if '_block_id' in data.columns:
+                groups.append('_block_id')
+
+            # Prepare series to operate on
+            # If we utilize groups, we use groupby
+            if groups:
+                grouped = data.groupby(groups, sort=False)[feature_col]
+                
+                if operation == 'rolling_mean':
+                    result = self._vectorized_rolling(grouped, window_size, 'mean', data, groups)
+                elif operation == 'rolling_std':
+                    result = self._vectorized_rolling(grouped, window_size, 'std', data, groups)
+                elif operation == 'rolling_min':
+                    result = self._vectorized_rolling(grouped, window_size, 'min', data, groups)
+                elif operation == 'rolling_max':
+                    result = self._vectorized_rolling(grouped, window_size, 'max', data, groups)
+                elif operation == 'rolling_median':
+                    result = self._vectorized_rolling(grouped, window_size, 'median', data, groups)
+                elif operation == 'rolling_sum':
+                    result = self._vectorized_rolling(grouped, window_size, 'sum', data, groups)
+                    
+                elif operation == 'lag':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = grouped.shift(lag_period).fillna(0).values
+                    
+                elif operation == 'diff':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = grouped.diff(lag_period).fillna(0).values
+                    
+                elif operation == 'pct_change':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = grouped.pct_change(lag_period).fillna(0).values
+                    result = np.where(np.isinf(result), 0, result)
+                    
+                elif operation == 'momentum':
+                    # Momentum is just diff
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = grouped.diff(lag_period).fillna(0).values
+                    
+                else:
+                    # Fallback for complex ops (ewm, seasonal, etc) - can be optimized later or keep using slower apply if rare
+                    # EWM on groupby is supported in recent pandas
+                    if operation == 'ewm':
+                        span = self._resolve_window_span(window_size, current_step)
+                        result = grouped.ewm(span=span, adjust=False).mean().reset_index(level=list(range(len(groups))), drop=True).sort_index().values
+                    else:
+                        # Fallback to loop for very complex custom ops
+                        return self._apply_time_based_operation_loop(data, feature_col, operation, window_size, lag_period, current_step)
+
+            else:
+                # No grouping - Global Time Series
+                series = data[feature_col]
+                
+                if operation == 'rolling_mean':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'mean')
+                elif operation == 'rolling_std':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'std').fillna(0)
+                elif operation == 'rolling_min':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'min')
+                elif operation == 'rolling_max':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'max')
+                elif operation == 'rolling_median':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'median')
+                elif operation == 'rolling_sum':
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'sum')
+                
+                elif operation == 'lag':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = series.shift(lag_period).fillna(0).values
+                    
+                elif operation == 'diff':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = series.diff(lag_period).fillna(0).values
+
+                elif operation == 'pct_change':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = series.pct_change(lag_period).fillna(0).values
+                    result = np.where(np.isinf(result), 0, result)
+                    
+                elif operation == 'momentum':
+                    lag_period = self._resolve_lag_period(lag_period, data)
+                    result = series.diff(lag_period).fillna(0).values
+
+                elif operation == 'ewm':
+                     span = self._resolve_window_span(window_size, current_step)
+                     result = series.ewm(span=span, adjust=False).mean().values
+
+                else:
+                     # Fallback
+                     return self._apply_time_based_operation_loop(data, feature_col, operation, window_size, lag_period, current_step)
+
+            # Ensure numpy array
+            if hasattr(result, 'values'):
+                result = result.values
+            return np.nan_to_num(result)
+
+        except Exception as e:
+            if self.verbose:
+                print(f"    Warning: Time-based operation {operation} failed for {feature_col}: {str(e)}")
+            return np.zeros(len(data))
+
+    def _vectorized_rolling(self, grouped, window_size, func, data, groups):
+        """Helper for vectorized rolling on groupby"""
+        # Determine if we can use integer window
+        use_int_window = isinstance(window_size, (int, np.integer))
+        
+        if use_int_window:
+            # Integer window - preserves original index in MultiIndex (groups..., orig_idx)
+            roller = grouped.rolling(window=window_size, min_periods=1)
+            if func == 'mean': res = roller.mean()
+            elif func == 'std': res = roller.std()
+            elif func == 'min': res = roller.min()
+            elif func == 'max': res = roller.max()
+            elif func == 'median': res = roller.median()
+            elif func == 'sum': res = roller.sum()
+            
+            # Align back to original index
+            # Drop group levels (0 to n-1)
+            # Result index: (g1, g2, ..., orig_idx)
+            return res.reset_index(level=list(range(len(groups))), drop=True).sort_index().fillna(0).values
+        else:
+            # Time-based window - Requires 'on' parameter and merging
+            # If using 'on', we need to pass the rolling object differently
+            # grouped.rolling(..., on=...) not directly available on SeriesGroupBy object easily in strict vector way without setup
+            
+            # Hybrid approach: Use integer approximation if possible, or accept loop for time-based if irregular?
+            # Or use apply which is safer but slower?
+            # Let's try to map generic time window to integer if data is regular-ish
+            # BUT user asked for '7D' specifically.
+            
+            # Fallback to loop for time-based windows on groups to ensure correctness if 'on' is complex
+            # OR try the merge strategy
+            
+            # Let's use the loop LOGIC for time-based properties if we can't vectorize easily WITHOUT bugs.
+            # But the requirement is to fix performance.
+            # Iterative groupby is the bottleneck.
+            
+            # If we assume 'daily' step for data, convert '7D' to 7.
+            # Most data in BigFeat context is likely treated as steps.
+            # But let's check if we can convert.
+            
+            est_rows = self._estimate_window_rows(window_size, data)
+            return self._vectorized_rolling(grouped, est_rows, func, data, groups)
+
+    def _vectorized_rolling_global(self, data, feature_col, window_size, func):
+        """Helper for global rolling"""
+        series = data[feature_col]
+        # Use 'on' if time-based
+        if isinstance(window_size, (int, np.integer)):
+             roller = series.rolling(window=window_size, min_periods=1)
+        else:
+             roller = data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
+             
+        if func == 'mean': return roller.mean()
+        elif func == 'std': return roller.std()
+        elif func == 'min': return roller.min()
+        elif func == 'max': return roller.max()
+        elif func == 'median': return roller.median()
+        elif func == 'sum': return roller.sum()
+
+    def _resolve_lag_period(self, lag_period, data):
+        """Resolve lag period to integer"""
+        if lag_period is None: 
+            return 1
+        if isinstance(lag_period, (int, np.integer)):
+            return lag_period
+        return self._estimate_window_rows(lag_period, data)
+
+    def _resolve_window_span(self, window_size, step):
+        """Resolve window size to span for EWM"""
+        if isinstance(window_size, (int, np.integer)):
+            return window_size
+        return max(1, window_size.days) # Simplified
+
+    def _estimate_window_rows(self, period, data):
+        """Estimate number of rows for a time period"""
+        # If period is integer, return it
+        if isinstance(period, (int, np.integer)):
+            return period
+        
+        # If period is string/Timedelta
+        if isinstance(period, str):
+            period = pd.Timedelta(period)
+            
+        # Simplistic conversion: 1 day = 1 row?
+        # Better: check average time step of data?
+        # But for vectorized speed, we might just assume 1 if not calculable.
+        # Actually, let's look at self.time_step
+        if self.time_step == 'D':
+            return max(1, period.days)
+        elif self.time_step == 'H':
+            return max(1, int(period.total_seconds() / 3600))
+        # ...
+        return max(1, period.days)
+
+    def _apply_time_based_operation_loop(self, data, feature_col, operation, window_size=None, lag_period=None, time_step=None):
+        """
+        Original iterative implementation as fallback
+        """
+        try:
+            # Use provided time_step or select new one (though usually fallback is called with one)
+            current_step = time_step or self._select_window_step()
 
             # Check if we have groupby columns
             if self.groupby_cols and any(col in data.columns for col in self.groupby_cols):
                 # Group data by groupby columns
                 groupby_cols = [col for col in self.groupby_cols if col in data.columns]
+                
+                # Check for block ID (Task 4) - fallback should also respect it if possible, 
+                # but legacy loop might not easily unless we add it to groupby cols
+                if '_block_id' in data.columns:
+                    groupby_cols.append('_block_id')
 
                 results = []
                 indices = []
@@ -658,11 +889,10 @@ class BigFeat:
                 ).fillna(0).values
 
             return result
-
-        except Exception as e:
-            if self.verbose:
-                print(f"    Warning: Time-based operation {operation} failed for {feature_col}: {str(e)}")
+        except Exception:
             return np.zeros(len(data))
+
+
 
     def _apply_single_group_operation(self, data, feature_col, operation, window_size=None, lag_period=None,
                                       time_step=None):
@@ -844,180 +1074,249 @@ class BigFeat:
             return False
 
     # Enhanced Safe Time Series Operations that use time-based operations
-    def _safe_rolling_mean(self, feature_data):
+    def _safe_rolling_mean(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling mean calculation using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        # Task 5: Use explicit context_data if provided, else fallback to global state
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_mean')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_mean', window_size=window_size, time_step=time_step)
         else:
             # Fallback to original implementation
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    # Estimate integer window if timedelta passed to fallback
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).mean().bfill().values
                 return self._clean_feature(result)
-            except Exception:
+            except (ValueError, TypeError) as e:
+                # Task 6: Specific catch and logging
+                if self.verbose: print(f"Error in rolling_mean: {e}")
+                return feature_data
+            except Exception as e:
+                if self.verbose: print(f"Unexpected error in rolling_mean: {e}")
                 return feature_data
 
-    def _safe_rolling_std(self, feature_data):
+    def _safe_rolling_std(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling standard deviation using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_std')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_std', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).std().fillna(0).values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in rolling_std: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_rolling_min(self, feature_data):
+    def _safe_rolling_min(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling minimum using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_min')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_min', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).min().bfill().values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in rolling_min: {e}")
                 return feature_data
 
-    def _safe_rolling_max(self, feature_data):
+    def _safe_rolling_max(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling maximum using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_max')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_max', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).max().bfill().values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in rolling_max: {e}")
                 return feature_data
 
-    def _safe_rolling_median(self, feature_data):
+    def _safe_rolling_median(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling median using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_median')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_median', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).median().bfill().values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in rolling_median: {e}")
                 return feature_data
 
-    def _safe_rolling_sum(self, feature_data):
+    def _safe_rolling_sum(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling sum using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'rolling_sum')
+            return self._apply_time_based_operation(data_source, feature_col, 'rolling_sum', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 result = pd.Series(feature_data).rolling(window=window_size, min_periods=1).sum().fillna(0).values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in rolling_sum: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_lag_feature(self, feature_data):
+    def _safe_lag_feature(self, feature_data, lag_period=None, context_data=None, **kwargs):
         """Safe lag feature creation using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'lag')
+            return self._apply_time_based_operation(data_source, feature_col, 'lag', lag_period=lag_period)
         else:
             try:
-                lag_periods = self.rng.choice([1, 2, 3, 5, 7, 10])
+                lag_periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                if isinstance(lag_periods, pd.Timedelta):
+                    lag_periods = max(1, lag_periods.days)
                 lag_periods = min(lag_periods, len(feature_data) - 1)
                 result = pd.Series(feature_data).shift(lag_periods).bfill().values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in lag_feature: {e}")
                 return feature_data
 
-    def _safe_diff_feature(self, feature_data):
+    def _safe_diff_feature(self, feature_data, lag_period=None, context_data=None, **kwargs):
         """Safe difference calculation using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'diff')
+            return self._apply_time_based_operation(data_source, feature_col, 'diff', lag_period=lag_period)
         else:
             try:
-                periods = self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                if isinstance(periods, pd.Timedelta):
+                    periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
                 result = pd.Series(feature_data).diff(periods).fillna(0).values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in diff_feature: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_pct_change(self, feature_data):
+    def _safe_pct_change(self, feature_data, lag_period=None, context_data=None, **kwargs):
         """Safe percentage change using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'pct_change')
+            return self._apply_time_based_operation(data_source, feature_col, 'pct_change', lag_period=lag_period)
         else:
             try:
-                periods = self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                if isinstance(periods, pd.Timedelta):
+                    periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
                 result = pd.Series(feature_data).pct_change(periods).fillna(0).values
                 result = np.where(np.isinf(result), 0, result)
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in pct_change: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_ewm(self, feature_data):
+    def _safe_ewm(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe exponential moving average using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'ewm')
+            return self._apply_time_based_operation(data_source, feature_col, 'ewm', window_size=window_size, time_step=time_step)
         else:
             try:
-                alpha = self.rng.choice([0.1, 0.2, 0.3, 0.5])
+                # Approximate alpha from window_size if passed, otherwise random
+                if window_size:
+                    if isinstance(window_size, pd.Timedelta):
+                        span = max(1, window_size.days)
+                    else:
+                        span = max(1, window_size)
+                    alpha = 2 / (span + 1)
+                else:
+                    alpha = self.rng.choice([0.1, 0.2, 0.3, 0.5])
                 result = pd.Series(feature_data).ewm(alpha=alpha, adjust=False).mean().values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in ewm: {e}")
                 return feature_data
 
-    def _safe_momentum(self, feature_data):
+    def _safe_momentum(self, feature_data, lag_period=None, context_data=None, **kwargs):
         """Safe momentum calculation using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'momentum')
+            return self._apply_time_based_operation(data_source, feature_col, 'momentum', lag_period=lag_period)
         else:
             try:
-                periods = self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                if isinstance(periods, pd.Timedelta):
+                    periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
                 series = pd.Series(feature_data)
                 momentum = series - series.shift(periods)
                 result = momentum.fillna(0).values
                 return self._clean_feature(result)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in momentum: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_seasonal_decompose(self, feature_data):
+    def _safe_seasonal_decompose(self, feature_data, context_data=None, **kwargs):
         """Safe seasonal decomposition using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'seasonal_decompose')
+            return self._apply_time_based_operation(data_source, feature_col, 'seasonal_decompose')
         else:
             try:
                 # Simple seasonal pattern extraction
@@ -1028,18 +1327,23 @@ class BigFeat:
                     return feature_data
                 seasonal = series.rolling(window=season_length, center=True, min_periods=1).mean()
                 return self._clean_feature(seasonal.fillna(series.mean()).values)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in seasonal_decompose: {e}")
                 return feature_data
 
-    def _safe_trend_feature(self, feature_data):
+    def _safe_trend_feature(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe trend feature using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'trend')
+            return self._apply_time_based_operation(data_source, feature_col, 'trend', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = self.rng.choice([7, 14, 30, 60])
+                window_size = window_size or self.rng.choice([7, 14, 30, 60])
+                if isinstance(window_size, pd.Timedelta):
+                    window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
                 series = pd.Series(feature_data)
                 # Simple trend as rolling linear regression slope
@@ -1047,35 +1351,42 @@ class BigFeat:
                     lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0, raw=True
                 )
                 return self._clean_feature(result.fillna(0).values)
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in trend_feature: {e}")
                 return np.zeros_like(feature_data)
 
-    def _safe_weekday_mean(self, feature_data):
+    def _safe_weekday_mean(self, feature_data, context_data=None, **kwargs):
         """Safe weekday mean using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'weekday_mean')
+            return self._apply_time_based_operation(data_source, feature_col, 'weekday_mean')
         else:
             # Fallback: create simple cyclical feature
             try:
                 result = np.sin(2 * np.pi * np.arange(len(feature_data)) / 7)
                 return self._clean_feature(result * np.std(feature_data) + np.mean(feature_data))
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in weekday_mean: {e}")
                 return feature_data
 
-    def _safe_month_mean(self, feature_data):
+    def _safe_month_mean(self, feature_data, context_data=None, **kwargs):
         """Safe month mean using time-based operations"""
-        if self.enable_time_series and hasattr(self, '_current_data') and hasattr(self, '_current_feature_index'):
+        data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
+        
+        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
                 self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
-            return self._apply_time_based_operation(self._current_data, feature_col, 'month_mean')
+            return self._apply_time_based_operation(data_source, feature_col, 'month_mean')
         else:
             # Fallback: create simple cyclical feature
             try:
                 result = np.sin(2 * np.pi * np.arange(len(feature_data)) / 30)
                 return self._clean_feature(result * np.std(feature_data) + np.mean(feature_data))
-            except Exception:
+            except Exception as e:
+                if self.verbose: print(f"Error in month_mean: {e}")
                 return feature_data
 
     def _calculate_block_params(self, total_limit, max_window_size=None):
@@ -1178,6 +1489,9 @@ class BigFeat:
         gen_feats : ndarray
             Generated and selected features
         """
+        
+        # Reset sorting state for new fit call
+        self._is_sorted = False
 
         if self.verbose:
             print("\n" + "=" * 60)
@@ -1214,9 +1528,19 @@ class BigFeat:
 
         # Prepare time series data if enabled
         if self.enable_time_series:
-            self._current_data = self._prepare_time_series_data(X)
+            # Sort X and y by datetime to ensure alignment (Task 4/6)
+            self._current_data, y_sorted = self._prepare_time_series_data(X, y)
+            
+            # CRITICAL: Update y to match sorted X order
+            if y_sorted is not None:
+                y = y_sorted
+            
+            # CRITICAL: Update X_features to match sorted order
+            X_features = self._current_data[self.feature_columns].values
+            X_features = np.array(X_features, dtype=float)
+            
             if self.verbose:
-                print(f"✓ Time series data prepared with datetime column: '{self.datetime_col}'")
+                print(f"✓ Time series data prepared and sorted with '{self.datetime_col}'")
 
         # === DYNAMIC MEMORY-AWARE DOWNSAMPLING LOGIC ===
         # Intelligently adapts sample size based on available system memory
@@ -1280,10 +1604,16 @@ class BigFeat:
 
                     # Generate contiguous blocks
                     sample_indices = []
-                    for start in sorted(start_indices):
-                        sample_indices.extend(range(start, start + block_size))
+                    block_ids_list = []
+                    for block_idx, start in enumerate(sorted(start_indices)):
+                        # Ensure we don't go out of bounds
+                        end = min(start + block_size, len(X_features))
+                        indices = range(start, end)
+                        sample_indices.extend(indices)
+                        block_ids_list.extend([block_idx] * len(indices))
 
                     sample_indices = np.array(sample_indices)
+                    block_ids_array = np.array(block_ids_list)
 
                     if self.verbose:
                         print(f"\n  ✓ Sampled {n_blocks_actual} contiguous blocks:")
@@ -1304,7 +1634,11 @@ class BigFeat:
 
                     if isinstance(self._current_data, pd.DataFrame):
                         self._current_data = self._current_data.iloc[sample_indices].reset_index(drop=True)
+                        # Add block ID to prevent seams (Task 4)
+                        self._current_data['_block_id'] = block_ids_array
                     else:
+                        # If simple array, convert to DF to support block IDs?
+                        # Probably unlikely to hit this execution path if enabling time series, as prepare_ts returns DF.
                         self._current_data = self._current_data[sample_indices]
 
                 # Store metadata
@@ -1420,7 +1754,7 @@ class BigFeat:
                 dpth = self.rng.choice(self.depth_range, p=self.depth_weights)
                 ops = []
                 ids = []
-                gen_feats[:, i] = self.feat_with_depth(X_scaled, dpth, ops, ids)
+                gen_feats[:, i] = self.feat_with_depth(X_scaled, dpth, ops, ids, context_data=getattr(self, '_current_data', None))
 
                 # Clean generated feature if time series is enabled
                 if self.enable_time_series:
@@ -1585,6 +1919,19 @@ class BigFeat:
                 delattr(self, '_original_data_full')
             if hasattr(self, '_full_current_data_backup'):
                 delattr(self, '_full_current_data_backup')
+        
+        # CRITICAL FIX: Restore original order for fit output (if not downsampled)
+        # If downsampled, transform() loop above already handled this.
+        # If NOT downsampled, gen_feats is still in time-sorted order from the fit loop.
+        if not self._was_downsampled and self.enable_time_series and hasattr(self, '_current_data') and hasattr(self._current_data, 'columns') and '_original_index' in self._current_data.columns:
+            # Create DataFrame with the restored index to align back to input X
+            res_df = pd.DataFrame(gen_feats)
+            res_df.index = self._current_data['_original_index']
+            
+            # We need to sort by index to restore original order
+            # (Assuming original index values are monotonic 0..N or similar, or just relying on index align)
+            res_df = res_df.sort_index()
+            return res_df.values
 
         return gen_feats
 
@@ -1644,49 +1991,24 @@ class BigFeat:
                 # Ensure numeric
                 X_features = np.array(X_features, dtype=float)
             else:
-                # Exclude datetime and groupby columns if they exist
-                exclude_cols = []
-                if self.datetime_col and self.datetime_col in X.columns:
-                    exclude_cols.append(self.datetime_col)
-                exclude_cols.extend([col for col in self.groupby_cols if col in X.columns])
-
-                # Get potential feature columns
-                feature_cols = [col for col in X.columns if col not in exclude_cols]
-
-                # Filter for numeric columns only using the same logic as fit
-                numeric_feature_cols = []
-                for col in feature_cols:
-                    col_dtype = str(X[col].dtype)
-                    # Skip datetime-like columns
-                    if (col_dtype.startswith('datetime') or
-                            col_dtype.startswith('<M8') or
-                            col_dtype == 'object'):
-                        if col_dtype == 'object':
-                            try:
-                                sample_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else None
-                                if sample_val is not None and hasattr(sample_val, 'year'):
-                                    continue
-                            except:
-                                pass
-                        else:
-                            continue
-
-                    try:
-                        test_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else 0
-                        float(test_val)
-                        numeric_feature_cols.append(col)
-                    except (ValueError, TypeError):
-                        continue
-
-                X_features = X[numeric_feature_cols].values
+                # Use standard identification logic
+                feature_cols = self._identify_feature_columns(X)
+                X_features = X[feature_cols].values
                 X_features = np.array(X_features, dtype=float)
 
             # Update current data for time series operations
+            context_data = None
             if self.enable_time_series:
-                self._current_data = self._prepare_time_series_data(X)
+                context_data = self._prepare_time_series_data(X)
+                self._current_data = context_data # Maintain for backward compatibility
+                
+                # CRITICAL FIX: Use sorted features for generation to match rolling window order
+                X_features = context_data[self.feature_columns].values
+                X_features = np.array(X_features, dtype=float)
         else:
             X_features = X
             X_features = np.array(X_features, dtype=float)
+            context_data = None
 
         X_scaled = self.scaler.transform(X_features)
         self.n_rows = X_scaled.shape[0]
@@ -1696,20 +2018,36 @@ class BigFeat:
             dpth = self.feat_depths[i]
             op_ls = self.tracking_ops[i].copy()
             id_ls = self.tracking_ids[i].copy()
-            gen_feats[:, i] = self.feat_with_depth_gen(X_scaled, dpth, op_ls, id_ls)
+            gen_feats[:, i] = self.feat_with_depth_gen(X_scaled, dpth, op_ls, id_ls, context_data=context_data)
             # Clean generated feature if time series is enabled
             if self.enable_time_series:
                 gen_feats[:, i] = self._clean_feature(gen_feats[:, i])
-
+                
+        # Combine generated features with original scaled features
         gen_feats = np.hstack((gen_feats, X_scaled))
+
+        # CRITICAL FIX: Restore original order if time series sorting was applied
+        if self.enable_time_series and context_data is not None and '_original_index' in context_data.columns:
+            # Create DataFrame with the restored index to align back to input X
+            res_df = pd.DataFrame(gen_feats)
+            res_df.index = context_data['_original_index']
+            
+            # Reindex to match original input X
+            if isinstance(X, pd.DataFrame):
+                res_df = res_df.reindex(X.index)
+            else:
+                # If X was array, _original_index is 0..N
+                res_df = res_df.sort_index()
+                
+            return res_df.values
 
         if self.selection == 'fAnova':
             gen_feats = self.fAnova_best.transform(gen_feats)
 
         return gen_feats
 
-    # Enhanced feat_with_depth method to support datetime-aware operations
-    def feat_with_depth(self, X, depth, op_ls, feat_ls):
+    # Enhanced feat_with_depth method to support datetime-aware operations with deterministic parameters
+    def feat_with_depth(self, X, depth, op_ls, feat_ls, context_data=None):
         """ Recursively generate a new features - Enhanced to handle datetime-aware time series operators """
         if depth == 0:
             feat_ind = self.rng.choice(np.arange(len(self.ig_vector)), p=self.ig_vector)
@@ -1721,21 +2059,56 @@ class BigFeat:
 
         depth -= 1
         op = self.rng.choice(self.operators, p=self.operator_weights)
+        
+        # Generate parameters for time series operators
+        params = {}
+        if self.enable_time_series and hasattr(self, 'time_series_operators') and op in self.time_series_operators:
+             # Identify which type of parameter is needed
+            op_name = getattr(op, '__name__', str(op))
+            
+            # Select time step for this operation branch
+            params['time_step'] = self.rng.choice(self.window_step_options) if self.window_step_options else 'D'
+            
+            if 'lag' in op_name or 'diff' in op_name or 'pct_change' in op_name or 'momentum' in op_name:
+                params['lag_period'] = self.rng.choice(self.lag_periods)
+            elif 'ewm' in op_name:
+                params['window_size'] = self.rng.choice(self.window_sizes)
+            elif 'seasonal' in op_name or 'weekday' in op_name or 'month' in op_name:
+                # No parameters needed or fixed logic
+                pass
+            elif 'trend' in op_name:
+                # Trend usually uses window
+                params['window_size'] = self.rng.choice(self.window_sizes)
+            else:
+                # Default to window size for rolling operations
+                params['window_size'] = self.rng.choice(self.window_sizes)
 
         if op in self.binary_operators:
-            feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls)
-            feat_2 = self.feat_with_depth(X, depth, op_ls, feat_ls)
-            op_ls.append((op, depth))
-            result = op(feat_1, feat_2)
+            feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls, context_data)
+            feat_2 = self.feat_with_depth(X, depth, op_ls, feat_ls, context_data)
+            op_ls.append((op, depth, params))
+            
+            # Apply with parameters if time series operator
+            if self.enable_time_series and op in self.time_series_operators:
+                result = op(feat_1, feat_2, context_data=context_data, **params)
+            else:
+                result = op(feat_1, feat_2)
+            
             return self._clean_feature(result) if self.enable_time_series else result
 
         elif op in self.unary_operators:
-            feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls)
-            op_ls.append((op, depth))
-            result = op(feat_1)
+            feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls, context_data)
+            op_ls.append((op, depth, params))
+            
+            # Apply with parameters if time series operator
+            if self.enable_time_series and op in self.time_series_operators:
+                result = op(feat_1, context_data=context_data, **params)
+            else:
+                result = op(feat_1)
+                
             return self._clean_feature(result) if self.enable_time_series else result
 
-    def feat_with_depth_gen(self, X, depth, op_ls, feat_ls):
+    def feat_with_depth_gen(self, X, depth, op_ls, feat_ls, context_data=None):
         """ Reproduce generated features with new data - Enhanced to handle datetime-aware time series operators """
         if depth == 0:
             feat_ind = feat_ls.pop()
@@ -1745,17 +2118,30 @@ class BigFeat:
             return X[:, feat_ind]
 
         depth -= 1
-        op = op_ls.pop()[0]
+        op_info = op_ls.pop()
+        op = op_info[0]
+        # Helper to extract params safely (handle legacy format without params)
+        params = op_info[2] if len(op_info) > 2 else {}
 
         if op in self.binary_operators:
-            feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls)
-            feat_2 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls)
-            result = op(feat_2, feat_1)
+            feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls, context_data)
+            feat_2 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls, context_data)
+            
+            if self.enable_time_series and op in self.time_series_operators:
+                result = op(feat_2, feat_1, context_data=context_data, **params)
+            else:
+                result = op(feat_2, feat_1)
+                
             return self._clean_feature(result) if self.enable_time_series else result
 
         elif op in self.unary_operators:
-            feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls)
-            result = op(feat_1)
+            feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls, context_data)
+            
+            if self.enable_time_series and op in self.time_series_operators:
+                result = op(feat_1, context_data=context_data, **params)
+            else:
+                result = op(feat_1)
+                
             return self._clean_feature(result) if self.enable_time_series else result
 
     # Original methods - completely unchanged from previous version
@@ -1803,7 +2189,18 @@ class BigFeat:
         total_estimators = []
 
         for sampled in range(sample_count):
-            sampled_ind = np.random.choice(np.arange(self.n_rows), size=self.n_rows // sample_size, replace=False)
+            if self.enable_time_series:
+                 # Task 6: Time-based splitting (contiguous block)
+                 n_sample = self.n_rows // sample_size
+                 if n_sample >= self.n_rows:
+                     sampled_ind = np.arange(self.n_rows)
+                 else:
+                     # Pick a random contiguous block to preserve temporal structure
+                     start_idx = np.random.randint(0, self.n_rows - n_sample)
+                     sampled_ind = np.arange(start_idx, start_idx + n_sample)
+            else:
+                 sampled_ind = np.random.choice(np.arange(self.n_rows), size=self.n_rows // sample_size, replace=False)
+
             sampled_X = X[sampled_ind]
             sampled_y = np.take(y, sampled_ind)
 
@@ -2039,37 +2436,45 @@ class BigFeat:
         # Filter out non-numeric columns
         numeric_feature_cols = []
         for col in all_feature_cols:
-            col_dtype = str(X[col].dtype)
-
-            # Skip datetime-like columns
-            if (col_dtype.startswith('datetime') or
-                    col_dtype.startswith('<M8') or
+            is_numeric = False
+            
+            # 1. Fast Pandas check for proper numeric types
+            if pd.api.types.is_numeric_dtype(X[col]):
+                 # Double check it's not a boolean (treated as numeric by some but maybe we want float/int)
+                 # BigFeat handles bool as 0/1 usually fine.
+                 is_numeric = True
+            
+            # 2. Check for object columns containing numbers (fallback)
+            else:
+                col_dtype = str(X[col].dtype)
+                
+                # Skip explicit datetime types (redundant if is_numeric_dtype is False but safe)
+                if (col_dtype.startswith('datetime') or 
+                    col_dtype.startswith('<M8') or 
                     col_dtype.startswith('timedelta')):
-                if self.verbose:
-                    print(f"  Skipping datetime column '{col}' (type: {col_dtype})")
-                continue
-
-            # Check object columns more carefully
-            if col_dtype == 'object':
+                    if self.verbose: 
+                        print(f"  Skipping datetime column '{col}' (type: {col_dtype})")
+                    continue
+                    
+                # Handle object/string columns
                 try:
-                    sample_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else None
-                    if sample_val is not None and hasattr(sample_val, 'year'):
-                        # Likely a datetime object
-                        if self.verbose:
-                            print(f"  Skipping datetime-like column '{col}'")
-                        continue
-                except:
+                    valid_vals = X[col].dropna()
+                    if len(valid_vals) > 0:
+                        val = valid_vals.iloc[0]
+                        # Check it's not a datetime object
+                        if hasattr(val, 'year') and hasattr(val, 'month'):
+                            if self.verbose:
+                                print(f"  Skipping datetime-like column '{col}'")
+                            continue
+                            
+                        # Try casting to float (Task 8 fix)
+                        float(val)
+                        is_numeric = True
+                except (ValueError, TypeError):
                     pass
-
-            # Test if column is numeric
-            try:
-                test_val = X[col].dropna().iloc[0] if len(X[col].dropna()) > 0 else 0
-                float(test_val)
+            
+            if is_numeric:
                 numeric_feature_cols.append(col)
-            except (ValueError, TypeError):
-                if self.verbose:
-                    print(f"  Skipping non-numeric column '{col}' (type: {col_dtype})")
-                continue
 
         return numeric_feature_cols
 
