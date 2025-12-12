@@ -118,7 +118,7 @@ class DFTWindowDetector:
             Preprocessed signal
         """
         # Handle NaN values
-        series = pd.Series(series).fillna(method='ffill').fillna(method='bfill').fillna(0).values
+        series = pd.Series(series).ffill().bfill().fillna(0).values
 
         # Remove linear trend
         x = np.arange(len(series))

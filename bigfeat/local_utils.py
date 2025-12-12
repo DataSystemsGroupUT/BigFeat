@@ -180,7 +180,7 @@ def exponential_moving_average(arr, alpha=0.3):
         alpha = np.clip(alpha, 0.01, 0.99)  # Ensure valid alpha
         series = pd.Series(arr)
         result = series.ewm(alpha=alpha, adjust=False).mean()
-        return result.fillna(method='bfill').values
+        return result.bfill().values
 
     except Exception as e:
         return arr
@@ -198,7 +198,7 @@ def bollinger_bands_upper(arr, window=20, num_std=2):
         rolling_std = series.rolling(window=window, min_periods=1).std()
         rolling_std = rolling_std.fillna(0)
         upper_band = rolling_mean + (rolling_std * num_std)
-        return upper_band.fillna(method='bfill').values
+        return upper_band.bfill().values
 
     except Exception as e:
         return arr
@@ -216,7 +216,7 @@ def bollinger_bands_lower(arr, window=20, num_std=2):
         rolling_std = series.rolling(window=window, min_periods=1).std()
         rolling_std = rolling_std.fillna(0)
         lower_band = rolling_mean - (rolling_std * num_std)
-        return lower_band.fillna(method='bfill').values
+        return lower_band.bfill().values
 
     except Exception as e:
         return arr
@@ -475,7 +475,7 @@ def safe_fibonacci_retracement(arr, window, level):
         rolling_min = series.rolling(window=window, min_periods=1).min()
         fib_level = rolling_max - level * (rolling_max - rolling_min)
 
-        return fib_level.fillna(method='bfill').replace([np.inf, -np.inf], series.median()).values
+        return fib_level.bfill().replace([np.inf, -np.inf], series.median()).values
 
     except Exception as e:
         return arr
@@ -638,7 +638,7 @@ def seasonal_trend(arr, period=12):
         series = pd.Series(arr)
         # Use centered moving average for trend extraction
         trend = series.rolling(window=period, center=True, min_periods=1).mean()
-        return trend.fillna(method='bfill').fillna(method='ffill').values
+        return trend.bfill().ffill().values
 
     except Exception as e:
         return arr

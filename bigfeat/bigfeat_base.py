@@ -13,16 +13,18 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import f1_score, make_scorer
+from bigfeat.dft_window_detector import DFTWindowDetector
 from functools import partial
 import warnings
 from datetime import timedelta
+import psutil  # For dynamic memory-aware sampling
 
 
 class BigFeat:
     def __init__(self,
                  task_type='classification',
                  enable_time_series='auto',  # 'yes'/'no'/'auto'
-                 window_detector='dft', # 'dft'/'acf'/'lomb_scargle'
+                 window_detector='dft',  # 'dft'/'acf'/'lomb_scargle'
                  window_sizes=None,
                  lag_periods=None,
                  verbose=True,
@@ -36,7 +38,12 @@ class BigFeat:
                  dft_confidence_threshold=0.3,
                  dft_min_window_days=1,
                  dft_max_window_days=365,
-                 dft_n_windows=6):
+                 dft_n_windows=6,
+
+                 # Downsampling parameters (NEW)
+                 enable_downsampling=False,
+                 max_fit_samples=0,
+                 downsampling_random_state=42):
         """
         Initialize the BigFeat object with configurable window detection
 
@@ -100,8 +107,49 @@ class BigFeat:
 
         dft_n_windows : int, default=6
             Number of window sizes to generate from DFT analysis
+
+        enable_downsampling : bool, default=False
+            Enable automatic downsampling for large datasets during fit().
+            Uses DYNAMIC MEMORY-AWARE sampling that adapts to available system RAM.
+
+            How it works:
+            1. Detects available system memory using psutil
+            2. Calculates safe sample size based on RAM and estimated feature count
+            3. Uses smaller of: dynamic limit OR max_fit_samples (if set)
+            4. Feature discovery (fit): Uses calculated sample
+            5. Feature application (transform): Uses ALL rows
+
+            This prevents out-of-memory errors while maximizing data usage:
+            - On 8GB laptop: Might sample 50K rows
+            - On 64GB server: Might sample 1M rows
+            - Automatically adapts without manual tuning
+
+            IMPORTANT for time series: Random sampling breaks temporal continuity.
+            During fit(), rolling windows will average discontinuous time points,
+            which may produce noisy feature importances. However, transform() on
+            the full dataset will have proper time continuity. This is a deliberate
+            trade-off: OOM protection vs perfect time coherence during discovery.
+
+        max_fit_samples : int, default=0
+            Upper bound for downsampling when enable_downsampling=True.
+
+            Behavior:
+            - If > 0: Acts as a cap on the dynamic sample size
+              Example: If dynamic calculation suggests 500K but max_fit_samples=100K,
+              it will use 100K (whichever is smaller)
+            - If = 0: Fully dynamic mode - uses only memory-based calculation
+              No upper limit except what memory allows
+
+            Recommendation:
+            - Keep 0 for fully adaptive behavior that maximizes memory usage
+            - Set a constant number (e.g., 100K) for reproducible results across machines
+            - Set higher (e.g., 500K) if you have abundant RAM and want more data
+
+        downsampling_random_state : int, default=42
+            Random seed for reproducible downsampling when enable_downsampling=True.
+            Ensures same sample is selected across runs for reproducibility.
         """
-        # BigFeat initialization
+        # Original initialization
         self.n_jobs = -1
         self.operators = [np.multiply, np.add, np.subtract, np.abs, np.square]
         self.binary_operators = [np.multiply, np.add, np.subtract]
@@ -128,6 +176,11 @@ class BigFeat:
         self.dft_min_window_days = dft_min_window_days
         self.dft_max_window_days = dft_max_window_days
         self.dft_n_windows = dft_n_windows
+
+        # Downsampling parameters (NEW)
+        self.enable_downsampling = enable_downsampling
+        self.max_fit_samples = max_fit_samples
+        self.downsampling_random_state = downsampling_random_state
 
         # Initialize the appropriate window detector
         self.window_detector_type = window_detector
@@ -292,7 +345,8 @@ class BigFeat:
 
                     if self.verbose:
                         avg_conf = np.mean(list(self.confidence_scores.values()))
-                        print(f"{self.window_detector_type.upper()} detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
+                        print(
+                            f"{self.window_detector_type.upper()} detected {len(self.window_sizes)} windows with avg confidence: {avg_conf:.2f}")
 
                 except Exception as e:
                     if self.verbose:
@@ -1024,6 +1078,71 @@ class BigFeat:
             except Exception:
                 return feature_data
 
+    def _calculate_block_params(self, total_limit, max_window_size=None):
+        """
+        Calculate optimal block sampling parameters (detector-agnostic).
+
+        Parameters:
+        -----------
+        total_limit : int
+            Maximum total samples allowed (from memory calculation)
+        max_window_size : int, optional
+            Maximum window size in days. If None, queries active detector.
+
+        Returns:
+        --------
+        tuple of (int, int)
+            (n_blocks, block_size)
+        """
+        # 1. Dynamic parameter resolution
+        if max_window_size is None:
+            if hasattr(self, 'window_detector') and hasattr(self.window_detector, 'max_window_days'):
+                max_window_size = self.window_detector.max_window_days
+                if self.verbose:
+                    print(f"  Querying {self.window_detector_type} detector: max_window={max_window_size} days")
+            elif hasattr(self, 'dft_max_window_days'):
+                max_window_size = self.dft_max_window_days
+                if self.verbose:
+                    print(f"  Using configured max_window: {max_window_size} days")
+            else:
+                max_window_size = 365
+                if self.verbose:
+                    print(f"  Using default max_window: {max_window_size} days")
+
+        # 2. Safety Calculation: Block must be 3x window size
+        min_block_size = max_window_size * 3
+
+        if self.verbose:
+            print(f"  Minimum safe block size: {min_block_size} rows (3x window)")
+
+        # 3. Emergency handling
+        if total_limit < min_block_size:
+            min_block_size = int(max_window_size * 1.1)
+            if self.verbose:
+                print(f"  ⚠️  Memory tight! Reducing to: {min_block_size}")
+
+            if total_limit < min_block_size:
+                min_block_size = max(1, total_limit)
+                if self.verbose:
+                    print(f"  ⚠️  CRITICAL: Using minimum: {min_block_size}")
+
+        # 4. Diversity Optimization
+        ideal_n_blocks = 10
+        tentative_block_size = total_limit // ideal_n_blocks
+
+        if tentative_block_size >= min_block_size:
+            n_blocks = ideal_n_blocks
+            block_size = tentative_block_size
+            if self.verbose:
+                print(f"  ✓ Optimal: {n_blocks} blocks × {block_size} rows")
+        else:
+            n_blocks = max(1, total_limit // min_block_size)
+            block_size = min_block_size
+            if self.verbose:
+                print(f"  ⚠️  Constrained: {n_blocks} blocks × {block_size} rows")
+
+        return n_blocks, block_size
+
     def fit(self, X, y, gen_size=5, random_state=0, iterations=5, estimator='avg',
             feat_imps=True, split_feats=None, check_corr=True, selection='stability', combine_res=True):
         """
@@ -1099,13 +1218,137 @@ class BigFeat:
             if self.verbose:
                 print(f"✓ Time series data prepared with datetime column: '{self.datetime_col}'")
 
+        # === DYNAMIC MEMORY-AWARE DOWNSAMPLING LOGIC ===
+        # Intelligently adapts sample size based on available system memory
+        if self.enable_downsampling:
+            # 1. Get available system memory
+            mem = psutil.virtual_memory()
+            available_ram_bytes = mem.available
+
+            # 2. Estimate memory consumption
+            n_cols = X_features.shape[1]
+            estimated_features_generated = gen_size * iterations
+            bytes_per_row = (n_cols + estimated_features_generated) * 8 * 4
+
+            # 3. Calculate safe row limit
+            safe_ram_limit = available_ram_bytes * 0.5
+            dynamic_max_samples = int(safe_ram_limit / bytes_per_row)
+
+            # 4. Determine final limit
+            if self.max_fit_samples > 0:
+                limit = min(self.max_fit_samples, dynamic_max_samples)
+                limit_source = "user-defined" if limit == self.max_fit_samples else "memory-based"
+            else:
+                limit = dynamic_max_samples
+                limit_source = "fully dynamic"
+
+            # 5. Apply BLOCK SAMPLING if needed
+            if len(X_features) > limit:
+                if self.verbose:
+                    print(f"\n{'=' * 60}")
+                    print("CONTIGUOUS BLOCK SAMPLING ENABLED")
+                    print(f"{'=' * 60}")
+                    print(f"Available RAM: {available_ram_bytes / 1e9:.2f} GB")
+                    print(f"Dataset size: {len(X_features):,} rows → {limit:,} rows")
+
+                # === Calculate block parameters ===
+                n_blocks, block_size = self._calculate_block_params(limit)
+
+                if self.verbose:
+                    print(f"\n📦 Block Sampling Strategy:")
+                    print(f"  Blocks: {n_blocks} × {block_size} rows")
+                    print(f"  Total: {n_blocks * block_size:,} rows")
+                    print(f"  Seed: {self.downsampling_random_state}")
+
+                # Create RNG
+                downsample_rng = np.random.RandomState(seed=self.downsampling_random_state)
+
+                # Calculate valid start positions
+                max_start = len(X_features) - block_size
+
+                if max_start < 0:
+                    # Dataset smaller than block - use all
+                    sample_indices = np.arange(len(X_features))
+                else:
+                    # Sample block starting positions
+                    n_blocks_actual = min(n_blocks, max_start + 1)
+                    start_indices = downsample_rng.choice(
+                        max_start + 1,
+                        n_blocks_actual,
+                        replace=False
+                    )
+
+                    # Generate contiguous blocks
+                    sample_indices = []
+                    for start in sorted(start_indices):
+                        sample_indices.extend(range(start, start + block_size))
+
+                    sample_indices = np.array(sample_indices)
+
+                    if self.verbose:
+                        print(f"\n  ✓ Sampled {n_blocks_actual} contiguous blocks:")
+                        for i, start in enumerate(sorted(start_indices)[:5]):  # Show first 5
+                            print(f"    Block {i + 1}: [{start:,} : {start + block_size - 1:,}]")
+                        if n_blocks_actual > 5:
+                            print(f"    ... and {n_blocks_actual - 5} more blocks")
+
+                # Apply sampling
+                X_features_sampled = X_features[sample_indices]
+                y_sampled = y[sample_indices] if y is not None else None
+
+                # Sync time series data
+                if self.enable_time_series and hasattr(self, '_current_data') and self._current_data is not None:
+                    if self.verbose:
+                        print(f"\n  ↻ Syncing time series data store...")
+                    self._full_current_data_backup = self._current_data
+
+                    if isinstance(self._current_data, pd.DataFrame):
+                        self._current_data = self._current_data.iloc[sample_indices].reset_index(drop=True)
+                    else:
+                        self._current_data = self._current_data[sample_indices]
+
+                # Store metadata
+                self.n_rows_original = len(X_features)
+                self.n_rows_fit = len(X_features_sampled)
+                self._was_downsampled = True
+                self._downsampling_method = 'contiguous_blocks'
+                # CRITICAL: Store original full data for final transform
+                self._X_features_full = X_features
+                self._original_data_full = self.original_data.copy() if isinstance(self.original_data,
+                                                                                   pd.DataFrame) else self.original_data
+
+                if self.verbose:
+                    print(f"\n{'=' * 60}")
+                    reduction_pct = (1 - self.n_rows_fit / self.n_rows_original) * 100
+                    print(
+                        f"✓ SAMPLING COMPLETE: {self.n_rows_original:,} → {self.n_rows_fit:,} ({reduction_pct:.1f}% reduction)")
+                    print(f"\n✓ Phase Separation Strategy:")
+                    print(f"  1. LEARN features on {self.n_rows_fit:,} sampled rows (memory-safe)")
+                    print(f"  2. APPLY features to all {self.n_rows_original:,} rows (full coverage)")
+                    print(f"  → Output will match original dimensions")
+                    print(f"{'=' * 60}\n")
+
+                X_for_fit = X_features_sampled
+                y_for_fit = y_sampled
+
+            else:
+                # No downsampling needed
+                X_for_fit = X_features
+                y_for_fit = y
+                self._was_downsampled = False
+        else:
+            # Downsampling disabled
+            X_for_fit = X_features
+            y_for_fit = y
+            self._was_downsampled = False
+
         # === Original BigFeat initialization ===
         self.selection = selection
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
         self.gen_steps = []
-        self.n_feats = X_features.shape[1]
-        self.n_rows = X_features.shape[0]
+        self.n_feats = X_for_fit.shape[1]
+        self.n_rows = X_for_fit.shape[0]
         self.ig_vector = np.ones(self.n_feats) / self.n_feats
         self.comb_mat = np.ones((self.n_feats, self.n_feats))
         self.split_vec = np.ones(self.n_feats)
@@ -1129,8 +1372,8 @@ class BigFeat:
 
         # Scaling
         self.scaler = MinMaxScaler()
-        self.scaler.fit(X_features)
-        X_scaled = self.scaler.transform(X_features)
+        self.scaler.fit(X_for_fit)
+        X_scaled = self.scaler.transform(X_for_fit)
 
         # Feature importance calculation
         if feat_imps:
@@ -1138,7 +1381,7 @@ class BigFeat:
                 print(f"\nComputing feature importances using '{estimator}' estimator...")
 
             self.ig_vector, estimators = self.get_feature_importances(
-                X_scaled, y, estimator, random_state
+                X_scaled, y_for_fit, estimator, random_state
             )
             self.ig_vector /= self.ig_vector.sum()
 
@@ -1194,7 +1437,7 @@ class BigFeat:
             if self.verbose:
                 print(f"  Selecting top {self.n_feats} features from {gen_feats.shape[1]} generated...")
 
-            imps, estimators = self.get_feature_importances(gen_feats, y, estimator, random_state)
+            imps, estimators = self.get_feature_importances(gen_feats, y_for_fit, estimator, random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
             gen_feats = gen_feats[:, feat_args]
@@ -1232,7 +1475,7 @@ class BigFeat:
             if self.verbose:
                 print(f"\nCombining results across {iterations} iterations...")
 
-            imps, estimators = self.get_feature_importances(iters_comb, y, estimator, random_state)
+            imps, estimators = self.get_feature_importances(iters_comb, y_for_fit, estimator, random_state)
             total_feats = np.argsort(imps)
             feat_args = total_feats[-self.n_feats:]
             gen_feats = iters_comb[:, feat_args]
@@ -1265,7 +1508,7 @@ class BigFeat:
                 self.fAnova_best = SelectKBest(f_classif, k=self.n_feats)
             else:
                 self.fAnova_best = SelectKBest(f_regression, k=self.n_feats)
-            gen_feats = self.fAnova_best.fit_transform(gen_feats, y)
+            gen_feats = self.fAnova_best.fit_transform(gen_feats, y_for_fit)
 
         # === Final Summary ===
         if self.verbose:
@@ -1291,6 +1534,57 @@ class BigFeat:
             # Print DFT summary if time series was used
             if self.enable_time_series and self.detection_strategy:
                 self.print_window_detection_summary()
+
+        if self._was_downsampled:
+            if self.verbose:
+                print(f"\n{'=' * 60}")
+                print("APPLYING LEARNED FEATURES TO FULL DATASET")
+                print(f"{'=' * 60}")
+                print(f"Learned from: {self.n_rows_fit:,} sampled rows")
+                print(f"Applying to: {self.n_rows_original:,} full rows")
+
+            # Restore full dataset for transform
+            original_current_data = self._current_data  # Save sampled version
+
+            if self.enable_time_series:
+                # Restore full time series data
+                if hasattr(self, '_full_current_data_backup'):
+                    self._current_data = self._full_current_data_backup
+                else:
+                    # Reconstruct from original data
+                    if isinstance(self._original_data_full, pd.DataFrame):
+                        self._current_data = self._prepare_time_series_data(self._original_data_full)
+
+            # Transform full dataset using learned features
+            if isinstance(self._original_data_full, pd.DataFrame):
+                gen_feats = self.transform(self._original_data_full)
+            else:
+                # For numpy arrays, need to reconstruct DataFrame with feature columns
+                if self.feature_columns:
+                    full_df = pd.DataFrame(self._X_features_full, columns=self.feature_columns)
+                    # Add datetime/groupby columns if available
+                    if isinstance(self.original_data, pd.DataFrame):
+                        if self.datetime_col and self.datetime_col in self.original_data.columns:
+                            full_df[self.datetime_col] = self.original_data[self.datetime_col].values
+                        for col in self.groupby_cols:
+                            if col in self.original_data.columns:
+                                full_df[col] = self.original_data[col].values
+                    gen_feats = self.transform(full_df)
+                else:
+                    gen_feats = self.transform(self._X_features_full)
+
+            if self.verbose:
+                print(f"✓ Transform complete: {gen_feats.shape}")
+                print(f"  Output dimensions now match original input")
+                print(f"{'=' * 60}\n")
+
+            # Clean up temporary storage
+            if hasattr(self, '_X_features_full'):
+                delattr(self, '_X_features_full')
+            if hasattr(self, '_original_data_full'):
+                delattr(self, '_original_data_full')
+            if hasattr(self, '_full_current_data_backup'):
+                delattr(self, '_full_current_data_backup')
 
         return gen_feats
 
@@ -1779,6 +2073,7 @@ class BigFeat:
 
         return numeric_feature_cols
 
+
     def get_window_detection_summary(self):
         """
         Get summary of window detection results
@@ -1786,21 +2081,21 @@ class BigFeat:
         Returns:
         --------
         dict
-            Dictionary containing window detection summary
+            Dictionary containing DFT detection summary
         """
         summary = {
             'mode': self.enable_time_series_mode,
             'time_series_enabled': self.enable_time_series,
             'datetime_col': self.datetime_col,
-            'detection_strategy': getattr(self, 'detection_strategy', None),
+            'detection_strategy': getattr(self, 'dft_detection_strategy', None),
             'window_sizes': [w.days for w in self.window_sizes] if self.window_sizes else None,
             'lag_periods': [l.days for l in self.lag_periods] if self.lag_periods else None,
-            'confidence_scores': getattr(self, 'confidence_scores', {}),
+            'dft_confidence_scores': getattr(self, 'dft_confidence_scores', {}),
             'avg_confidence': None
         }
 
-        if summary['confidence_scores']:
-            summary['avg_confidence'] = np.mean(list(summary['confidence_scores'].values()))
+        if summary['dft_confidence_scores']:
+            summary['avg_confidence'] = np.mean(list(summary['dft_confidence_scores'].values()))
 
         return summary
 
@@ -1823,9 +2118,9 @@ class BigFeat:
             print(f"\nWindow Sizes (days): {summary['window_sizes']}")
             print(f"Lag Periods (days): {summary['lag_periods']}")
 
-            if summary['confidence_scores']:
-                print(f"\nConfidence Scores:")
-                for feat, conf in summary['confidence_scores'].items():
+            if summary['dft_confidence_scores']:
+                print(f"\nDFT Confidence Scores:")
+                for feat, conf in summary['dft_confidence_scores'].items():
                     status = "STRONG" if conf > 2.0 else "MODERATE" if conf > 1.3 else "WEAK"
                     print(f"  {feat}: {conf:.2f} ({status})")
                 if summary['avg_confidence']:
