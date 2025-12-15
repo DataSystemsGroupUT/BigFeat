@@ -235,7 +235,8 @@ class ACFWindowDetector:
                                df: pd.DataFrame,
                                datetime_col: str,
                                feature_cols: List[str],
-                               sampling_rate: str = 'D') -> Tuple[List[pd.Timedelta], Dict[str, float]]:
+                               sampling_rate: str = 'D',
+                               groupby_cols: Optional[List[str]] = None) -> Tuple[List[pd.Timedelta], Dict[str, float]]:
         """
         Detect optimal window sizes using Autocorrelation Function
 
@@ -259,6 +260,20 @@ class ACFWindowDetector:
         """
         if datetime_col not in df.columns:
             raise ValueError(f"Datetime column '{datetime_col}' not found in DataFrame")
+
+        # Handle grouped data
+        if groupby_cols:
+            try:
+                 first_row = df.iloc[0]
+                 mask = np.ones(len(df), dtype=bool)
+                 for col in groupby_cols:
+                     if col in df.columns:
+                         mask &= (df[col] == first_row[col])
+                 df = df[mask].copy()
+                 if self.verbose:
+                     print(f"ACF: Analying single time series (first group) with {len(df)} samples")
+            except Exception as e:
+                warnings.warn(f"Failed to extract single series for ACF: {e}. using full dataset.")
 
         # Sort by datetime
         df_sorted = df.sort_values(datetime_col).reset_index(drop=True)
@@ -398,7 +413,8 @@ class ACFWindowDetector:
     def assess_periodicity(self,
                            df: pd.DataFrame,
                            datetime_col: str,
-                           feature_cols: List[str]) -> Tuple[bool, float, Dict[str, float]]:
+                           feature_cols: List[str],
+                           groupby_cols: Optional[List[str]] = None) -> Tuple[bool, float, Dict[str, float]]:
         """
         Assess if time series data exhibits strong periodicity using ACF
 
@@ -420,7 +436,9 @@ class ACFWindowDetector:
         feature_confidences : dict
             Individual confidence scores per feature
         """
-        _, confidence_scores = self.detect_optimal_windows(df, datetime_col, feature_cols)
+        _, confidence_scores = self.detect_optimal_windows(
+            df, datetime_col, feature_cols, groupby_cols=groupby_cols
+        )
 
         if not confidence_scores:
             return False, 0.0, {}
@@ -439,12 +457,15 @@ class ACFWindowDetector:
     def smart_window_selection(self,
                                df: pd.DataFrame,
                                datetime_col: str,
-                               feature_cols: List[str]) -> Tuple[List[pd.Timedelta], str]:
+                               feature_cols: List[str],
+                               groupby_cols: Optional[List[str]] = None) -> Tuple[List[pd.Timedelta], str]:
         """
         Smart window selection with hybrid strategy
         Compatible with BigFeat's DFTWindowDetector API
         """
-        windows, confidence_scores = self.detect_optimal_windows(df, datetime_col, feature_cols)
+        windows, confidence_scores = self.detect_optimal_windows(
+            df, datetime_col, feature_cols, groupby_cols=groupby_cols
+        )
 
         if not confidence_scores:
             return self._get_default_windows(), 'standard'

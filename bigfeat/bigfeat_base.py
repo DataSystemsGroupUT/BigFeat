@@ -223,6 +223,10 @@ class BigFeat:
         self.confidence_scores = None
         self.detection_strategy = None
 
+        # Tracking variables for current data state
+        self._current_data = None
+        self._current_feature_index = None
+
         # Validate task_type input
         if task_type not in ['classification', 'regression']:
             raise ValueError("task_type must be either 'classification' or 'regression'")
@@ -337,7 +341,8 @@ class BigFeat:
                             self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                             self.datetime_col,
                             feature_cols,
-                            sampling_rate=self.time_step
+                            sampling_rate=self.time_step,
+                            groupby_cols=self.groupby_cols
                         )
 
                     self.window_sizes = self.detected_windows
@@ -413,7 +418,8 @@ class BigFeat:
                     self.window_detector.assess_periodicity(
                         self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                         self.datetime_col,
-                        feature_cols
+                        feature_cols,
+                        groupby_cols=self.groupby_cols
                     )
 
                 # Step 4: Decide based on confidence
@@ -427,7 +433,8 @@ class BigFeat:
                         self.window_detector.smart_window_selection(
                             self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                             self.datetime_col,
-                            feature_cols
+                            feature_cols,
+                            groupby_cols=self.groupby_cols
                         )
 
                     self.detected_windows = self.window_sizes
@@ -578,8 +585,9 @@ class BigFeat:
             df[self.datetime_col] = pd.to_datetime(df[self.datetime_col])
 
         # Sort by datetime and groupby columns for proper time series order
-        sort_cols = [self.datetime_col] if self.datetime_col in df.columns else []
-        sort_cols.extend([col for col in self.groupby_cols if col in df.columns])
+        sort_cols = [col for col in self.groupby_cols if col in df.columns]
+        if self.datetime_col in df.columns:
+            sort_cols.append(self.datetime_col)
         
         if sort_cols:
             # 1. Store the original index to restore order later (Task Fix: Transform Order)
@@ -678,7 +686,7 @@ class BigFeat:
                     # EWM on groupby is supported in recent pandas
                     if operation == 'ewm':
                         span = self._resolve_window_span(window_size, current_step)
-                        result = grouped.ewm(span=span, adjust=False).mean().reset_index(level=list(range(len(groups))), drop=True).sort_index().values
+                        result = grouped.ewm(span=span, adjust=False).mean().values
                     else:
                         # Fallback to loop for very complex custom ops
                         return self._apply_time_based_operation_loop(data, feature_col, operation, window_size, lag_period, current_step)
@@ -753,7 +761,8 @@ class BigFeat:
             # Align back to original index
             # Drop group levels (0 to n-1)
             # Result index: (g1, g2, ..., orig_idx)
-            return res.reset_index(level=list(range(len(groups))), drop=True).sort_index().fillna(0).values
+            # Since data is pre-sorted by groups, the result values are already aligned with data.values
+            return res.values
         else:
             # Time-based window - Requires 'on' parameter and merging
             # If using 'on', we need to pass the rolling object differently
@@ -781,18 +790,37 @@ class BigFeat:
     def _vectorized_rolling_global(self, data, feature_col, window_size, func):
         """Helper for global rolling"""
         series = data[feature_col]
-        # Use 'on' if time-based
-        if isinstance(window_size, (int, np.integer)):
-             roller = series.rolling(window=window_size, min_periods=1)
-        else:
-             roller = data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
+        
+        # Sort temporarily by time for global calculation if needed
+        # Since we switched to Group-First sorting, the global data might not be time-sorted
+        if self.datetime_col in data.columns:
+             temp_data = data.sort_values(self.datetime_col)
+             series_for_rolling = temp_data[feature_col]
              
-        if func == 'mean': return roller.mean()
-        elif func == 'std': return roller.std()
-        elif func == 'min': return roller.min()
-        elif func == 'max': return roller.max()
-        elif func == 'median': return roller.median()
-        elif func == 'sum': return roller.sum()
+             if isinstance(window_size, (int, np.integer)):
+                 roller = series_for_rolling.rolling(window=window_size, min_periods=1)
+             else:
+                 roller = temp_data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
+        else:
+             series_for_rolling = series
+             if isinstance(window_size, (int, np.integer)):
+                 roller = series.rolling(window=window_size, min_periods=1)
+             else:
+                 # Should not happen if datetime_col is missing but just in case
+                 roller = data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
+        
+        if func == 'mean': res = roller.mean()
+        elif func == 'std': res = roller.std()
+        elif func == 'min': res = roller.min()
+        elif func == 'max': res = roller.max()
+        elif func == 'median': res = roller.median()
+        elif func == 'sum': res = roller.sum()
+        
+        if self.datetime_col in data.columns:
+             # Align back to the original (Group-sorted) index
+             return res.reindex(data.index).values
+        else:
+             return res.values
 
     def _resolve_lag_period(self, lag_period, data):
         """Resolve lag period to integer"""
@@ -1878,7 +1906,7 @@ class BigFeat:
                 print(f"Applying to: {self.n_rows_original:,} full rows")
 
             # Restore full dataset for transform
-            original_current_data = self._current_data  # Save sampled version
+            original_current_data = getattr(self, '_current_data', None)  # Save sampled version safely
 
             if self.enable_time_series:
                 # Restore full time series data
@@ -2241,7 +2269,8 @@ class BigFeat:
                 num_round = 2
                 bst = lgb.train(param, train_data, num_round)
                 lgb_imps = bst.feature_importance(importance_type='gain')
-                lgb_imps /= lgb_imps.sum()
+                if lgb_imps.sum() > 0:
+                    lgb_imps /= lgb_imps.sum()
                 total_importances = (rf_importances + lgb_imps) / 2
 
             else:
@@ -2492,15 +2521,15 @@ class BigFeat:
             'mode': self.enable_time_series_mode,
             'time_series_enabled': self.enable_time_series,
             'datetime_col': self.datetime_col,
-            'detection_strategy': getattr(self, 'dft_detection_strategy', None),
+            'detection_strategy': getattr(self, 'detection_strategy', None),
             'window_sizes': [w.days for w in self.window_sizes] if self.window_sizes else None,
             'lag_periods': [l.days for l in self.lag_periods] if self.lag_periods else None,
-            'dft_confidence_scores': getattr(self, 'dft_confidence_scores', {}),
+            'confidence_scores': getattr(self, 'confidence_scores', {}),
             'avg_confidence': None
         }
 
-        if summary['dft_confidence_scores']:
-            summary['avg_confidence'] = np.mean(list(summary['dft_confidence_scores'].values()))
+        if summary['confidence_scores']:
+            summary['avg_confidence'] = np.mean(list(summary['confidence_scores'].values()))
 
         return summary
 
@@ -2523,14 +2552,16 @@ class BigFeat:
             print(f"\nWindow Sizes (days): {summary['window_sizes']}")
             print(f"Lag Periods (days): {summary['lag_periods']}")
 
-            if summary['dft_confidence_scores']:
-                print(f"\nDFT Confidence Scores:")
-                for feat, conf in summary['dft_confidence_scores'].items():
+            if summary['confidence_scores']:
+                print(f"\nConfidence Scores:")
+                for feat, conf in summary['confidence_scores'].items():
                     status = "STRONG" if conf > 2.0 else "MODERATE" if conf > 1.3 else "WEAK"
                     print(f"  {feat}: {conf:.2f} ({status})")
                 if summary['avg_confidence']:
                     print(f"\nAverage Confidence: {summary['avg_confidence']:.2f}")
-                    print(f"Threshold: {self.dft_confidence_threshold}")
+                    # Use generic confidence threshold if available, else dft specific
+                    threshold = getattr(self, 'confidence_threshold', getattr(self, 'dft_confidence_threshold', 0))
+                    print(f"Threshold: {threshold}")
         else:
             print(f"Reason: {summary['detection_strategy']}")
 
