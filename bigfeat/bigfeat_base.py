@@ -648,7 +648,7 @@ class BigFeat:
             # Prepare series to operate on
             # If we utilize groups, we use groupby
             if groups:
-                grouped = data.groupby(groups, sort=False)[feature_col]
+                grouped = data.groupby(groups, sort=False, group_keys=False)[feature_col]
                 
                 if operation == 'rolling_mean':
                     result = self._vectorized_rolling(grouped, window_size, 'mean', data, groups)
