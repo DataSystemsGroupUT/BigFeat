@@ -1,2 +1,2 @@
 name = 'bigfeat'
-import bigfeat.bigfeat_base
+import bigfeat.base

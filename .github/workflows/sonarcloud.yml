@@ -1,0 +1,72 @@
+name: SonarCloud Quality Review
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  sonarcloud:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+    
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+          pip install -e . 
+
+      - name: Run Tests and Generate Coverage
+        run: |
+          pytest tests/ --cov=bigfeat --cov-report=xml:coverage.xml --junitxml=pytest-report.xml -o junit_family=xunit1
+
+      - name: 🕵️ Debug - Verify Files and Paths
+        run: |
+          echo "================================================="
+          echo "1. Current Working Directory:"
+          pwd
+          echo "================================================="
+          echo "2. Listing files in current directory:"
+          ls -la
+          echo "================================================="
+          echo "3. Checking if pytest-report.xml exists:"
+          if [ -f "pytest-report.xml" ]; then echo "✅ pytest-report.xml FOUND"; else echo "❌ pytest-report.xml MISSING"; fi
+          echo "================================================="
+          echo "4. Checking if coverage.xml exists:"
+          if [ -f "coverage.xml" ]; then echo "✅ coverage.xml FOUND"; else echo "❌ coverage.xml MISSING"; fi
+          echo "================================================="
+          echo "5. Content of pytest-report.xml (First 20 lines) to verify file paths:"
+          head -n 20 pytest-report.xml
+          echo "================================================="
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v7.1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}    
+        with:
+          args: >
+            -Dsonar.projectKey=taha2samy_bigfeat
+            -Dsonar.organization=taha2samy
+            -Dsonar.sources=bigfeat
+            -Dsonar.tests=tests
+            -Dsonar.python.version=3.10
+            -Dsonar.exclusions=benchmarking/**,docs/**,metafeatures_training/**
+            -Dsonar.python.coverage.reportPaths=${{ github.workspace }}/coverage.xml
+            -Dsonar.python.xunit.reportPath=${{ github.workspace }}/pytest-report.xml
+            -Dsonar.python.xunit.reportPaths=${{ github.workspace }}/pytest-report.xml
