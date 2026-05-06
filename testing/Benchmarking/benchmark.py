@@ -36,15 +36,48 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 import sys
 
 # Add BigFeat to path if needed
 # sys.path.append('/path/to/bigfeat')
 from bigfeat.bigfeat_base import BigFeat
 
+class BigFeatJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder for NumPy and Pandas types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+            return str(obj)
+        return super().default(obj)
+
 warnings.filterwarnings('ignore')
 
+
+
+# Optional OpenFE import with patch for sklearn 1.6+ compatibility
+try:
+    from openfe import OpenFE, transform
+    from sklearn.metrics import mean_squared_error as sklearn_mse
+    import numpy as np
+
+    class PatchedOpenFE(OpenFE):
+        """
+        OpenFE subclass that fixes compatibility with scikit-learn 1.6+.
+        Overrides get_init_metric to handle removal of 'squared' parameter.
+        Defined at module level to allow pickling by joblib (multiprocessing).
+        """
+        def get_init_metric(self, pred, label):
+            # Original OpenFE code: mean_squared_error(label, pred, squared=False)
+            # New sklearn: calculate MSE then sqrt manually
+            val = sklearn_mse(label, pred)
+            return np.sqrt(val)
+except ImportError:
+    PatchedOpenFE = None
+    transform = None
 
 class ResourceMonitor:
     """Monitor CPU and memory usage during execution."""
@@ -92,6 +125,7 @@ class TimeSeriesBenchmark:
                  output_dir: str = "./benchmark_results",
                  time_limit_per_dataset: int = 3600,
                  random_seeds: List[int] = None,
+                 methods: List[str] = None,
                  verbose: bool = True):
         """
         Initialize benchmark suite.
@@ -104,6 +138,9 @@ class TimeSeriesBenchmark:
             Time limit in seconds for each dataset
         random_seeds : list
             Random seeds for reproducibility (default: [42])
+        methods : list
+            List of specific methods to run (e.g. ['baseline', 'auto_ensemble']).
+            If None or empty, runs all methods.
         verbose : bool
             Whether to print progress
         """
@@ -111,6 +148,7 @@ class TimeSeriesBenchmark:
         self.output_dir.mkdir(exist_ok=True, parents=True)
         self.time_limit = time_limit_per_dataset
         self.random_seeds = random_seeds or [42]
+        self.methods = methods or []
         self.verbose = verbose
 
         # Datasets from AutoGluon paper
@@ -118,7 +156,7 @@ class TimeSeriesBenchmark:
             "car_parts_without_missing",
             "cif_2016",
             "covid_deaths",
-            #"electricity_hourly",
+            "electricity_hourly",
             "electricity_weekly",
             "fred_md",
             "hospital",
@@ -126,10 +164,10 @@ class TimeSeriesBenchmark:
             "m1_monthly",
             "m1_quarterly",
             "m1_yearly",
-            "m3_monthly",
-            "m3_other",
-            "m3_quarterly",
-            "m3_yearly",
+            # "m3_monthly",
+            # "m3_other",
+            # "m3_quarterly",
+            # "m3_yearly",
             "m4_daily",
             "m4_hourly",
             "m4_monthly",
@@ -143,7 +181,7 @@ class TimeSeriesBenchmark:
             "tourism_quarterly",
             "tourism_yearly",
             "vehicle_trips_without_missing",
-            "kaggle_web_traffic_weekly",
+            # "kaggle_web_traffic_weekly",
         ]
 
         # Estimators to test
@@ -156,14 +194,327 @@ class TimeSeriesBenchmark:
         # BigFeat configurations to test
         # Note: For 'no' mode, detector doesn't matter, so we only test once
         self.bigfeat_configs = [
-            ('auto', 'dft'),
-            ('auto', 'acf'),
-            ('auto', 'lomb_scargle'),
-            ('yes', 'dft'),
-            ('yes', 'acf'),
-            ('yes', 'lomb_scargle'),
-            ('no', 'dft'),  # Detector irrelevant for 'no' mode
+            ('auto', 'ensemble'), # Represents the new Smart Ensemble Logic
+            ('yes', 'dft'),       # Forced: Tests raw DFT performance
+            ('yes', 'acf'),       # Forced: Tests raw ACF performance
+            ('yes', 'lomb_scargle'), # Forced: Tests raw Lomb-Scargle performance
+            ('no', 'standard'),   # No TS: Baseline BigFeat performance
         ]
+
+    def should_run(self, method_name: str) -> bool:
+        """
+        Check if a specific method/config should be run.
+        
+        Parameters:
+        -----------
+        method_name : str
+            Name of the method (e.g. 'baseline', 'tsfresh', 'auto_ensemble')
+            
+        Returns:
+        --------
+        should_run : bool
+        """
+        # If no methods specified, run everything
+        if not self.methods:
+            return True
+            
+        # Normalize for case-insensitivity
+        selected = [m.lower() for m in self.methods]
+        target = method_name.lower()
+        
+        return target in selected
+
+    def _get_diversity_metrics(self, bf_instance) -> Dict[str, int]:
+        """
+        Calculate Feature Diversity / Intelligence Metrics (Step 3).
+        Categorizes generated features into: Autoregressive, Volatility/Rolling, Trend/Smoothing, Seasonal.
+        """
+        metrics = {
+            'autoregressive': 0,
+            'volatility': 0,
+            'trend': 0,
+            'seasonal': 0,
+            'complex': 0,
+            'total_ops': 0
+        }
+
+        # Try to access tracking_ops from BigFeat instance
+        tracking_ops = getattr(bf_instance, 'tracking_ops', [])
+        
+        # If empty, try to parse from feature names (fallback)
+        if len(tracking_ops) == 0 and hasattr(bf_instance, 'feature_names_in_'):
+             # This is a heuristic fallback if tracking_ops isn't populated directly
+             # Real BigFeat v2 should have tracking_ops
+             pass
+
+        for op in tracking_ops:
+            op_type = str(op).lower()
+            metrics['total_ops'] += 1
+            
+            if any(x in op_type for x in ['lag', 'diff', 'proportional_scale']):
+                metrics['autoregressive'] += 1
+            elif any(x in op_type for x in ['rolling_std', 'rolling_min', 'rolling_max', 'rolling_median', 'rolling_mean', 'rolling_sum', 'kurtosis', 'skew']):
+                metrics['volatility'] += 1
+            elif any(x in op_type for x in ['ewm', 'trend', 'linear_trend', 'exponential_smoothing']):
+                metrics['trend'] += 1
+            elif any(x in op_type for x in ['seasonal', 'weekday', 'month', 'cos', 'sin']):
+                metrics['seasonal'] += 1
+            else:
+                metrics['complex'] += 1
+                
+        return metrics
+
+    def run_tsfresh(self,
+                   X_train: pd.DataFrame,
+                   y_train: np.ndarray,
+                   X_test: pd.DataFrame,
+                   y_test: np.ndarray,
+                   estimator_name: str = 'rf',
+                   datetime_col: str = 'timestamp') -> Dict[str, Any]:
+        """
+        Run tsfresh baseline evaluation (Step 4).
+        Competes against BigFeat on Efficiency Frontier (MASE vs Runtime).
+        """
+        # Import manually to allow running benchmark without tsfresh installed
+        try:
+            from tsfresh import extract_features, select_features
+            from tsfresh.utilities.dataframe_functions import impute
+        except ImportError:
+            if self.verbose:
+                print("    ! tsfresh not installed. Skipping comparison.")
+            return {'status': 'skipped', 'reason': 'tsfresh not installed'}
+
+        # Track total time
+        monitor_total = ResourceMonitor()
+        monitor_total.start()
+
+        # Track feature engineering time
+        monitor_fe = ResourceMonitor()
+        monitor_fe.start()
+
+        try:
+            # Prepare data for tsfresh (needs flat DataFrame with id and time)
+            # X_train already has item_id and timestamp if preserved in pipeline
+            
+            # Helper to prepare tsfresh input
+            def prepare_for_tsfresh(X, y=None):
+                if 'item_id' not in X.columns or datetime_col not in X.columns:
+                     # Create dummy ID if missing
+                     df = X.copy()
+                     if 'item_id' not in df.columns: df['item_id'] = 0
+                     if datetime_col not in df.columns: df[datetime_col] = df.index
+                     return df
+                return X.copy()
+
+            df_train = prepare_for_tsfresh(X_train)
+            df_test = prepare_for_tsfresh(X_test)
+            
+            # 1. Extract Features (Series-Level)
+            if self.verbose: print("    Running tsfresh extraction (Series-Level)...")
+            
+            # Use 'Efficient' settings to be comparable but still comprehensive
+            X_train_extracted = extract_features(
+                df_train, 
+                column_id='item_id', 
+                column_sort=datetime_col,
+                impute_function=impute,
+                disable_progressbar=not self.verbose,
+                n_jobs=0 # Use all cores
+            )
+            
+            # Extract for test set (using test data history? - Standard benchmark practice)
+            # Ideally we extract from full history up to test point, but for this baseline
+            # extracting from test set is the standard "tsfresh usage" proxy if not rolling.
+            X_test_extracted = extract_features(
+                df_test,
+                column_id='item_id',
+                column_sort=datetime_col,
+                impute_function=impute,
+                disable_progressbar=not self.verbose,
+                n_jobs=0
+            )
+            
+            # 2. Select Features
+            # We need a target vector for selection. 
+            # tsfresh expects 1 target per series. We have many (forecasting).
+            # So we can't use `select_features` easily without rolling.
+            # We will SKIP selection and use all extracted features (or PCA if too many?)
+            # "tsfresh typically generates hundreds or thousands..."
+            # We will use all. RF can handle it.
+            
+            if self.verbose: print(f"    Generated {X_train_extracted.shape[1]} features.")
+            
+            # 3. Broadcast features to timesteps
+            # X_train_extracted index is item_id.
+            # We merge back to X_train.
+            
+            # Reset index to make item_id a column
+            X_train_features = X_train_extracted.reset_index().rename(columns={'index': 'item_id'})
+            X_test_features = X_test_extracted.reset_index().rename(columns={'index': 'item_id'})
+            
+            # Merge
+            X_train_final = pd.merge(X_train, X_train_features, on='item_id', how='left')
+            X_test_final = pd.merge(X_test, X_test_features, on='item_id', how='left')
+            
+            # Drop non-numeric for training
+            X_train_final = X_train_final.select_dtypes(include=[np.number]).fillna(0)
+            X_test_final = X_test_final.select_dtypes(include=[np.number]).fillna(0)
+            
+            fe_resources = monitor_fe.stop()
+            
+            # Track model training separately
+            monitor_model = ResourceMonitor()
+            monitor_model.start()
+
+            # Train model
+            estimator = self.estimators[estimator_name]
+            estimator.fit(X_train_final, y_train)
+
+            # Predict
+            y_pred = estimator.predict(X_test_final)
+
+            # Stop model tracking
+            model_resources = monitor_model.stop()
+
+            # Calculate metrics
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            r2 = r2_score(y_test, y_pred)
+            mase = self.calculate_series_mase(y_test, y_pred, X_test, y_train, X_train)
+
+            total_resources = monitor_total.stop()
+
+            return {
+                'mae': mae,
+                'rmse': rmse,
+                'r2': r2,
+                'mase': mase,
+                'n_features': X_train_final.shape[1],
+                'status': 'success',
+                'wall_time': total_resources['wall_time'],
+                'cpu_time': total_resources['cpu_time'],
+                'cpu_percent': total_resources['cpu_percent'],
+                'memory_delta_mb': total_resources['memory_delta_mb'],
+                'fe_wall_time': fe_resources['wall_time'],
+                'model_wall_time': model_resources['wall_time']
+            }
+
+        except Exception as e:
+            if self.verbose: print(f"    ✗ tsfresh failed: {e}")
+            return {'status': 'failed', 'error': str(e)}
+
+    def run_openfe(self,
+                  X_train: pd.DataFrame,
+                  y_train: np.ndarray,
+                  X_test: pd.DataFrame,
+                  y_test: np.ndarray,
+                  estimator_name: str = 'rf',
+                  datetime_col: str = 'timestamp') -> Dict[str, Any]:
+        """
+        Run OpenFE baseline evaluation (Step 5).
+        Competes against BigFeat on Efficiency Frontier.
+        https://github.com/IIIS-Li-Group/OpenFE
+        """
+        if PatchedOpenFE is None or transform is None:
+            if self.verbose:
+                print("    ! OpenFE not installed. Skipping comparison.")
+            return {'status': 'skipped', 'reason': 'OpenFE not installed'}
+
+        # Track total time
+        monitor_total = ResourceMonitor()
+        monitor_total.start()
+
+        # Track feature engineering time
+        monitor_fe = ResourceMonitor()
+        monitor_fe.start()
+
+        try:
+            if self.verbose: print("    Running OpenFE extraction...")
+            
+            # Prepare data: 
+            
+            # CRITICAL FIX: OpenFE requires contiguous integer index (0..N-1)
+            # We also filter to numeric columns only to avoid issues with item_id (string) or timestamp
+            # This matches run_baseline logic.
+            
+            # Select numeric features only
+            exclude_cols = ['timestamp', 'item_id', 'target'] # target shouldn't be in X but good to be safe
+            numeric_cols = [c for c in X_train.columns if c not in exclude_cols and pd.api.types.is_numeric_dtype(X_train[c])]
+            
+            # If no numeric columns (unlikely given target_lag_1), fall back to original but warn?
+            # benchmark.py always adds target_lag_1 so we should be fine.
+            
+            X_train_num = X_train[numeric_cols].reset_index(drop=True)
+            X_test_num = X_test[numeric_cols].reset_index(drop=True)
+
+            ofe = PatchedOpenFE()
+            
+            # Note: fit returns the list of new features. 
+            features = ofe.fit(data=X_train_num, label=pd.DataFrame(y_train), n_jobs=4)
+            
+            # 2. Transform
+            X_train_fe, X_test_fe = transform(X_train_num, X_test_num, features, n_jobs=4)
+            
+            # 3. Post-process: Handle categorical features if OpenFE generated any
+            # (fillNa(0) fails on Categorical type if 0 is not a category)
+            # We select only numeric columns for the final model (RF) as well.
+            # OpenFE might generate categorical features from binning.
+            
+            # Convert categorical to codes or drop? 
+            # For simplicity and robustness: convert all to numeric, coercing errors?
+            # Or just select_dtypes(number)
+            
+            X_train_final = X_train_fe.select_dtypes(include=[np.number]).copy()
+            X_test_final = X_test_fe.select_dtypes(include=[np.number]).copy()
+            
+            # Fill NaNs
+            X_train_final = X_train_final.fillna(0)
+            X_test_final = X_test_final.fillna(0)
+            
+            fe_resources = monitor_fe.stop()
+            
+            if self.verbose: print(f"    Generated {X_train_final.shape[1]} features (Original: {X_train.shape[1]})")
+
+            # Track model training separately
+            monitor_model = ResourceMonitor()
+            monitor_model.start()
+
+            # Train model
+            estimator = self.estimators[estimator_name]
+            estimator.fit(X_train_final, y_train)
+
+            # Predict
+            y_pred = estimator.predict(X_test_final)
+
+            # Stop model tracking
+            model_resources = monitor_model.stop()
+
+            # Calculate metrics
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            r2 = r2_score(y_test, y_pred)
+            mase = self.calculate_series_mase(y_test, y_pred, X_test, y_train, X_train)
+
+            total_resources = monitor_total.stop()
+
+            return {
+                'mae': mae,
+                'rmse': rmse,
+                'r2': r2,
+                'mase': mase,
+                'n_features': X_train_final.shape[1],
+                'status': 'success',
+                'wall_time': total_resources['wall_time'],
+                'cpu_time': total_resources['cpu_time'],
+                'cpu_percent': total_resources['cpu_percent'],
+                'memory_delta_mb': total_resources['memory_delta_mb'],
+                'fe_wall_time': fe_resources['wall_time'],
+                'model_wall_time': model_resources['wall_time']
+            }
+
+        except Exception as e:
+            if self.verbose: print(f"    ✗ OpenFE failed: {e}")
+            return {'status': 'failed', 'error': str(e)}
 
     def load_and_prepare_dataset(self, dataset_name: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
@@ -427,7 +778,7 @@ class TimeSeriesBenchmark:
             X_test_num = X_test[feature_cols].fillna(0)
 
         # Scale features
-        scaler = StandardScaler()
+        scaler = RobustScaler()
         X_train_scaled = scaler.fit_transform(X_train_num)
         X_test_scaled = scaler.transform(X_test_num)
 
@@ -571,30 +922,38 @@ class TimeSeriesBenchmark:
         X_train_with_features = self.create_basic_temporal_features(X_train, datetime_col)
         X_test_with_features = self.create_basic_temporal_features(X_test, datetime_col)
 
-        # Determine appropriate parameters based on data frequency
-        freq = X_train[datetime_col].iloc[1] - X_train[datetime_col].iloc[0] if len(X_train) > 1 else pd.Timedelta(days=1)
+        # Robust Frequency Detection (Median of diffs to handle irregular starts/missing/ids)
+        if 'item_id' in X_train.columns:
+            # Sample first few series to estimate frequency
+            sample_ids = X_train['item_id'].unique()[:5]
+            sample_df = X_train[X_train['item_id'].isin(sample_ids)]
+            # Calculate diffs per group
+            diffs = sample_df.groupby('item_id')[datetime_col].apply(lambda x: x.sort_values().diff().dropna())
+            if len(diffs) > 0:
+                freq_delta = diffs.median()
+            else:
+                freq_delta = pd.Timedelta(days=1)
+        else:
+             # Single series
+             diffs = X_train[datetime_col].sort_values().diff().dropna()
+             if len(diffs) > 0:
+                 freq_delta = diffs.median()
+             else:
+                 freq_delta = pd.Timedelta(days=1)
 
-        # Set appropriate window detection parameters based on frequency
-        if freq >= pd.Timedelta(days=300):  # Yearly data
-            min_window = 365
-            max_window = 365 * 10
-            n_windows = 4
-        elif freq >= pd.Timedelta(days=80):  # Quarterly data
-            min_window = 90
-            max_window = 365 * 3
-            n_windows = 5
-        elif freq >= pd.Timedelta(days=25):  # Monthly data
-            min_window = 30
-            max_window = 365 * 2
-            n_windows = 6
-        elif freq >= pd.Timedelta(days=5):  # Weekly data
-            min_window = 7
-            max_window = 365
-            n_windows = 6
-        else:  # Daily or hourly
-            min_window = 1
-            max_window = 365
-            n_windows = 6
+        if self.verbose:
+            print(f"    Detected Frequency: {freq_delta}")
+
+        if freq_delta >= pd.Timedelta(days=300):  # Yearly
+            min_window, max_window, n_windows, time_step = 365, 365 * 10, 4, 'Y'
+        elif freq_delta >= pd.Timedelta(days=80):  # Quarterly
+            min_window, max_window, n_windows, time_step = 90, 365 * 3, 5, 'Q'
+        elif freq_delta >= pd.Timedelta(days=25):  # Monthly
+            min_window, max_window, n_windows, time_step = 30, 365 * 2, 6, 'M'
+        elif freq_delta >= pd.Timedelta(days=6):   # Weekly (allow >6 days for weekly)
+            min_window, max_window, n_windows, time_step = 7, 365, 6, 'W'
+        else:  # Daily/Hourly
+            min_window, max_window, n_windows, time_step = 1, 365, 6, 'D'
 
         # Default BigFeat parameters with native downsampling
         default_params = {
@@ -602,20 +961,35 @@ class TimeSeriesBenchmark:
             'verbose': False,  # Reduce noise in benchmark
             'enable_time_series': enable_time_series,
             'window_detector': window_detector,
+
             'datetime_col': datetime_col,
             'groupby_cols': ['item_id'] if 'item_id' in X_train.columns else None,
-            'dft_confidence_threshold': 0.3,
-            'dft_min_window_days': min_window,
-            'dft_max_window_days': max_window,
-            'dft_n_windows': n_windows,
-            # Native dynamic downsampling (NEW!)
+            'min_window_days': min_window,
+            'max_window_days': max_window,
+            'n_windows': n_windows,
+            'time_step': time_step,
+            # Native dynamic downsampling
             'enable_downsampling': True,
-            'max_fit_samples': 0,  # 0 = fully dynamic (adapts to available RAM)
+            'max_fit_samples': 500000,
             'downsampling_random_state': 42,  # Reproducible sampling
+
+            # GA Optimization Params (Optimized for Speed)
+            'n_features': 15,      # Reduced from 30
+            'gen_size': 5,         # Reduced from 25
+            'iterations': 5,       # Reduced from 12
+            'max_depth': 3,        # Allow 3-operator combinations
         }
 
         if bigfeat_params:
             default_params.update(bigfeat_params)
+
+        # Extract fit parameters to prevent init crash
+        fit_keys = ['gen_size', 'iterations', 'n_features', 'max_depth']
+        fit_params = {k: default_params.pop(k) for k in fit_keys if k in default_params}
+        
+        # Ensure standard fit params
+        fit_params.setdefault('random_state', 42)
+        fit_params.setdefault('estimator', 'avg')
 
         try:
             # Initialize BigFeat with native downsampling
@@ -638,10 +1012,7 @@ class TimeSeriesBenchmark:
             X_train_transformed = bf.fit(
                 X_train_with_features,  # Full data - BigFeat handles sampling
                 y_train,
-                gen_size=10,
-                iterations=5,
-                random_state=42,
-                estimator='avg'
+                **fit_params
             )
 
             # Transform test set (always uses full data)
@@ -658,9 +1029,15 @@ class TimeSeriesBenchmark:
                     'time_series_enabled': summary['time_series_enabled'],
                     'detection_strategy': summary['detection_strategy'],
                     'window_sizes_days': summary['window_sizes'],
-                    'avg_confidence': summary['avg_confidence'],
+                    # refined confidence capture
+                    'avg_confidence': summary['avg_confidence'] if summary.get('avg_confidence') is not None else getattr(bf, 'avg_consensus_confidence', None),
+                    'avg_lag1': getattr(bf, 'avg_lag1', None), # Capture Stationarity Gate metric
                     'window_detector': window_detector
                 }
+                
+                # Explicitly capture avg_lag1 as requested by user
+                if hasattr(bf, 'avg_lag1'):
+                     detector_info['ts_avg_lag1'] = bf.avg_lag1
             else:
                 detector_info = {
                     'time_series_enabled': False,
@@ -669,6 +1046,17 @@ class TimeSeriesBenchmark:
                     'avg_confidence': None,
                     'window_detector': window_detector
                 }
+
+            # Get downsampling info
+            downsampling_info = {
+                'was_downsampled': getattr(bf, '_was_downsampled', False),
+                'n_rows_original': getattr(bf, 'n_rows_original', None),
+                'n_rows_fit': getattr(bf, 'n_rows_fit', None),
+                'downsampling_method': getattr(bf, '_downsampling_method', None)
+            }
+            
+            # Calculate Diversity Metrics (Step 3)
+            diversity_metrics = self._get_diversity_metrics(bf)
 
             # Track model training separately
             monitor_model = ResourceMonitor()
@@ -703,6 +1091,8 @@ class TimeSeriesBenchmark:
                 'n_features_base_temporal': len([c for c in X_train_with_features.columns
                                                  if c not in X_train.columns]),
                 'detector_info': detector_info,
+                'downsampling_info': downsampling_info,
+                'diversity_metrics': diversity_metrics, # Logic Step 3 result
                 'status': 'success',
                 # Total resources (BigFeat + model training)
                 'wall_time': total_resources['wall_time'],
@@ -725,6 +1115,8 @@ class TimeSeriesBenchmark:
             }
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             total_resources = monitor_total.stop()
 
             if self.verbose:
@@ -806,7 +1198,7 @@ class TimeSeriesBenchmark:
 
                 # Save checkpoint after loading
                 with open(result_file, 'w') as f:
-                    json.dump(results, f, indent=2, default=str)
+                    json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
                 if self.verbose:
                     print(f"  💾 Checkpoint: Metadata saved")
             else:
@@ -825,7 +1217,7 @@ class TimeSeriesBenchmark:
 
                 # Save final result
                 with open(result_file, 'w') as f:
-                    json.dump(results, f, indent=2, default=str)
+                    json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
 
                 return results
 
@@ -839,7 +1231,7 @@ class TimeSeriesBenchmark:
                 print(f"  Test: {len(X_test)} samples")
 
             # Run baseline (skip if already completed)
-            if 'baseline' not in results or results['baseline'].get('status') == 'failed':
+            if self.should_run('baseline') and ('baseline' not in results or results['baseline'].get('status') == 'failed'):
                 if self.verbose:
                     print(f"\n1. Running Baseline (no feature engineering)...")
 
@@ -851,11 +1243,11 @@ class TimeSeriesBenchmark:
 
                     # Save checkpoint after baseline
                     with open(result_file, 'w') as f:
-                        json.dump(results, f, indent=2, default=str)
+                        json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
 
                     if self.verbose:
                         print(f"  ✓ Baseline")
-                        print(f"    MASE: {baseline_results['mase']:.4f}")
+                        print(f"    MASE: {float(baseline_results['mase']):.4f}")
                         print(f"    Features: {baseline_results['n_features']}")
                         print(f"    Total Time: {baseline_results['wall_time']:.2f}s")
                         print(f"      - Data Prep: {baseline_results.get('prep_wall_time', 0):.2f}s")
@@ -871,12 +1263,12 @@ class TimeSeriesBenchmark:
 
                     # Save checkpoint even on failure
                     with open(result_file, 'w') as f:
-                        json.dump(results, f, indent=2, default=str)
+                        json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
             else:
                 if self.verbose:
                     print(f"\n1. Baseline (already completed)")
                     if 'mase' in results['baseline']:
-                        print(f"  ✓ MASE: {results['baseline']['mase']:.4f}")
+                        print(f"  ✓ MASE: {float(results['baseline']['mase']):.4f}")
 
             # Run BigFeat variants
             for i, (ts_mode, detector) in enumerate(self.bigfeat_configs, 2):
@@ -889,7 +1281,10 @@ class TimeSeriesBenchmark:
                     if self.verbose:
                         print(f"\n{i}. {label} (already completed)")
                         if 'mase' in results[key]:
-                            print(f"  ✓ MASE: {results[key]['mase']:.4f}")
+                            print(f"  ✓ MASE: {float(results[key]['mase']):.4f}")
+                    continue
+
+                if not self.should_run(config_name):
                     continue
 
                 if self.verbose:
@@ -908,12 +1303,12 @@ class TimeSeriesBenchmark:
 
                     # Save checkpoint after EACH BigFeat configuration
                     with open(result_file, 'w') as f:
-                        json.dump(results, f, indent=2, default=str)
+                        json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
 
                     if bf_results['status'] == 'success':
                         if self.verbose:
                             print(f"  ✓ {label}")
-                            print(f"    MASE: {bf_results['mase']:.4f}")
+                            print(f"    MASE: {float(bf_results['mase']):.4f}")
                             print(f"    Features: {bf_results['n_features_generated']}")
                             print(f"    Total Time: {bf_results['wall_time']:.2f}s")
                             print(f"      - BigFeat: {bf_results['bigfeat_wall_time']:.2f}s ({bf_results.get('bigfeat_cpu_percent', 0):.1f}% CPU)")
@@ -926,7 +1321,15 @@ class TimeSeriesBenchmark:
                                 if det_info.get('avg_confidence'):
                                     print(f"    TS Confidence: {det_info['avg_confidence']:.2f}")
 
+                            metrics = bf_results.get('diversity_metrics', {})
+                            print(f"    Diversity: {metrics.get('total_ops',0)} ops "
+                                  f"(AR:{metrics.get('autoregressive',0)} "
+                                  f"Vol:{metrics.get('volatility',0)} "
+                                  f"Seas:{metrics.get('seasonal',0)})")
+
                             print(f"  💾 Checkpoint: {label} saved")
+                        else:
+                            print(f"  ✗ Failed: {bf_results.get('error')}")
 
                 except Exception as e:
                     if self.verbose:
@@ -935,13 +1338,64 @@ class TimeSeriesBenchmark:
 
                     # Save checkpoint even on failure
                     with open(result_file, 'w') as f:
-                        json.dump(results, f, indent=2, default=str)
+                        json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
+
+            # Run tsfresh Baseline (Step 4)
+            # Only run if not already done
+            if self.should_run('tsfresh') and ('tsfresh' not in results or results['tsfresh'].get('status') == 'failed'):
+                 if self.verbose:
+                     print(f"\n{len(self.bigfeat_configs)+2}. Running tsfresh (Baseline Comparison)...")
+                 
+                 tsfresh_results = self.run_tsfresh(
+                     X_train, y_train, X_test, y_test, estimator_name, datetime_col='timestamp'
+                 )
+                 results['tsfresh'] = tsfresh_results
+                 
+                 # Save checkpoint
+                 with open(result_file, 'w') as f:
+                     json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
+                     
+                 if self.verbose:
+                     if tsfresh_results['status'] == 'success':
+                         print(f"  ✓ tsfresh MASE: {float(tsfresh_results['mase']):.4f}")
+                         print(f"    Features: {tsfresh_results['n_features']}")
+                         print(f"    Time: {tsfresh_results['wall_time']:.2f}s")
+                     else:
+                         print(f"  ✗ tsfresh skipped/failed: {tsfresh_results.get('reason') or tsfresh_results.get('error')}")
+            else:
+                 if self.verbose:
+                     print(f"\n{len(self.bigfeat_configs)+2}. tsfresh (already completed)")
+            
+            # Run OpenFE Baseline (Step 5)
+            if self.should_run('openfe') and ('openfe' not in results or results['openfe'].get('status') == 'failed'):
+                 if self.verbose:
+                     print(f"\n{len(self.bigfeat_configs)+3}. Running OpenFE (Baseline Comparison)...")
+                 
+                 openfe_results = self.run_openfe(
+                     X_train, y_train, X_test, y_test, estimator_name, datetime_col='timestamp'
+                 )
+                 results['openfe'] = openfe_results
+                 
+                 # Save checkpoint
+                 with open(result_file, 'w') as f:
+                     json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
+                     
+                 if self.verbose:
+                     if openfe_results['status'] == 'success':
+                         print(f"  ✓ OpenFE MASE: {float(openfe_results['mase']):.4f}")
+                         print(f"    Features: {openfe_results['n_features']}")
+                         print(f"    Time: {openfe_results['wall_time']:.2f}s")
+                     else:
+                         print(f"  ✗ OpenFE skipped/failed: {openfe_results.get('reason') or openfe_results.get('error')}")
+            else:
+                 if self.verbose:
+                     print(f"\n{len(self.bigfeat_configs)+3}. OpenFE (already completed)")
 
             results['status'] = 'completed'
 
-            # Final save with completed status
+            # Final save
             with open(result_file, 'w') as f:
-                json.dump(results, f, indent=2, default=str)
+                json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
 
             if self.verbose:
                 print(f"\n  ✅ Dataset completed and saved")
@@ -954,7 +1408,7 @@ class TimeSeriesBenchmark:
 
             # Save even on catastrophic failure
             with open(result_file, 'w') as f:
-                json.dump(results, f, indent=2, default=str)
+                json.dump(results, f, indent=2, cls=BigFeatJSONEncoder)
 
         return results
 
@@ -984,9 +1438,16 @@ class TimeSeriesBenchmark:
         print(f"Datasets to test: {len(datasets)}")
         print(f"Estimator: {estimator_name}")
         print(f"BigFeat configurations: {len(self.bigfeat_configs)}")
-        print(f"  - Baseline (no BigFeat)")
-        for ts_mode, detector in self.bigfeat_configs:
-            print(f"  - BigFeat: enable_time_series='{ts_mode}', window_detector='{detector}'")
+        
+        if not self.methods:
+             print(f"  - Baseline (no BigFeat)")
+             for ts_mode, detector in self.bigfeat_configs:
+                 print(f"  - BigFeat: enable_time_series='{ts_mode}', window_detector='{detector}'")
+             print(f"  - tsfresh")
+             print(f"  - OpenFE")
+        else:
+             print(f"Selected Methods: {self.methods}")
+
         print(f"Output directory: {self.output_dir.absolute()}")
         print(f"\n💾 CRASH RECOVERY ENABLED:")
         print(f"  - Results saved after each method completes")
@@ -1084,6 +1545,33 @@ class TimeSeriesBenchmark:
                     if det_info['time_series_enabled']:
                         row[f'{config_name}_ts_strategy'] = det_info['detection_strategy']
                         row[f'{config_name}_ts_confidence'] = det_info.get('avg_confidence')
+                        row[f'{config_name}_ts_avg_lag1'] = det_info.get('ts_avg_lag1')
+
+            # tsfresh results
+            if 'tsfresh' in result and result['tsfresh']['status'] == 'success':
+                tsfresh = result['tsfresh']
+                row['tsfresh_mase'] = tsfresh['mase']
+                row['tsfresh_mae'] = tsfresh['mae']
+                row['tsfresh_r2'] = tsfresh['r2']
+                row['tsfresh_time'] = tsfresh['wall_time']
+                row['tsfresh_cpu_pct'] = tsfresh['cpu_percent']
+                row['tsfresh_mem_mb'] = tsfresh['memory_delta_mb']
+                row['tsfresh_n_features'] = tsfresh['n_features']
+                row['tsfresh_fe_time'] = tsfresh.get('fe_wall_time', 0)
+                row['tsfresh_model_time'] = tsfresh.get('model_wall_time', 0)
+
+            # OpenFE results
+            if 'openfe' in result and result['openfe']['status'] == 'success':
+                openfe = result['openfe']
+                row['openfe_mase'] = openfe['mase']
+                row['openfe_mae'] = openfe['mae']
+                row['openfe_r2'] = openfe['r2']
+                row['openfe_time'] = openfe['wall_time']
+                row['openfe_cpu_pct'] = openfe['cpu_percent']
+                row['openfe_mem_mb'] = openfe['memory_delta_mb']
+                row['openfe_n_features'] = openfe['n_features']
+                row['openfe_fe_time'] = openfe.get('fe_wall_time', 0)
+                row['openfe_model_time'] = openfe.get('model_wall_time', 0)
 
             summary_data.append(row)
 
@@ -1109,23 +1597,32 @@ class TimeSeriesBenchmark:
         """Print summary statistics of benchmark results."""
 
         print(f"\n{'='*80}")
-        print("Performance Summary")
+        print("Performance Summary (MASE Statistics)")
         print(f"{'='*80}\n")
 
-        # All methods (baseline + all BigFeat configs)
-        methods = ['baseline'] + [f'{ts_mode}_{detector}'
-                                 for ts_mode, detector in self.bigfeat_configs]
+        methods = ['baseline'] + [f'{ts_mode}_{detector}' for ts_mode, detector in self.bigfeat_configs] + ['tsfresh', 'openfe']
 
-        # MASE comparison
-        print("Average MASE by method:")
-        print(f"  {'Method':<30} {'MASE':>10}")
-        print(f"  {'-'*30} {'-'*10}")
+        # Expanded MASE comparison
+        print(f"  {'Method':<30} {'Mean':>10} {'Median':>10} {'Max':>10}")
+        print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*10}")
+
         for method in methods:
             col = f'{method}_mase'
             if col in summary_df.columns:
                 avg_mase = summary_df[col].mean()
-                method_label = 'Baseline' if method == 'baseline' else f'BF-{method}'
-                print(f"  {method_label:<30} {avg_mase:>10.4f}")
+                med_mase = summary_df[col].median()
+                max_mase = summary_df[col].max()
+
+                if method == 'baseline':
+                    method_label = 'Baseline'
+                elif method == 'tsfresh':
+                    method_label = 'tsfresh'
+                elif method == 'openfe':
+                    method_label = 'OpenFE'
+                else:
+                    method_label = f'BF-{method}'
+                    
+                print(f"  {method_label:<30} {avg_mase:>10.4f} {med_mase:>10.4f} {max_mase:>10.4f}")
 
         # Wins against baseline
         print("\n\nWins against Baseline (lower MASE):")
@@ -1137,7 +1634,14 @@ class TimeSeriesBenchmark:
                 wins = (summary_df[mase_col] < summary_df['baseline_mase']).sum()
                 total = summary_df[mase_col].notna().sum()
                 win_rate = (wins / total * 100) if total > 0 else 0
-                method_label = f'BF-{method}'
+                
+                if method == 'tsfresh':
+                    method_label = 'tsfresh'
+                elif method == 'openfe':
+                    method_label = 'OpenFE'
+                else:
+                    method_label = f'BF-{method}'
+                    
                 print(f"  {method_label:<30} {wins:>3}/{total:<6} {win_rate:>9.1f}%")
 
         # Runtime comparison
@@ -1154,8 +1658,17 @@ class TimeSeriesBenchmark:
                 avg_cpu = summary_df[cpu_col].mean() if cpu_col in summary_df.columns else 0
                 avg_mem = summary_df[mem_col].mean() if mem_col in summary_df.columns else 0
 
-                method_label = 'Baseline' if method == 'baseline' else f'BF-{method}'
+                if method == 'baseline':
+                    method_label = 'Baseline'
+                elif method == 'tsfresh':
+                    method_label = 'tsfresh'
+                elif method == 'openfe':
+                    method_label = 'OpenFE'
+                else:
+                    method_label = f'BF-{method}'
+                    
                 print(f"  {method_label:<30} {avg_time:>10.2f} {avg_cpu:>10.1f} {avg_mem:>10.1f}")
+
 
         # Time series detection statistics (for auto modes)
         print("\n\nTime Series Detection Statistics (auto modes):")
@@ -1222,6 +1735,11 @@ def main():
         default=True,
         help='Print detailed progress'
     )
+    parser.add_argument(
+        '--methods',
+        nargs='+',
+        help='Specific methods to run (e.g. baseline, tsfresh, openfe, auto_ensemble, yes_dft, ...). Default: all.'
+    )
 
     args = parser.parse_args()
 
@@ -1229,7 +1747,8 @@ def main():
     benchmark = TimeSeriesBenchmark(
         output_dir=args.output_dir,
         time_limit_per_dataset=args.time_limit,
-        verbose=args.verbose
+        verbose=args.verbose,
+        methods=args.methods
     )
 
     # Select datasets

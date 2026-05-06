@@ -8,11 +8,18 @@ warnings.filterwarnings('ignore')
 
 
 # Basic utility functions
+def robust_scale_feature(arr):
+    """Replace hard clipping with smooth log-scaling to preserve signal shape"""
+    # Soften extremes: sign(x) * log(1 + abs(x))
+    return np.sign(arr) * np.log1p(np.abs(arr))
+
+
 def unary_cube(arr):
     """Original cube transformation with overflow protection"""
     try:
-        result = np.power(np.clip(arr, -100, 100), 3)
-        return np.clip(result, -1e10, 1e10)
+        # Instead of np.clip(result, -1e10, 1e10)
+        result = np.power(arr, 3)
+        return robust_scale_feature(result)
     except:
         return arr
 

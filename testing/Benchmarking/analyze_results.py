@@ -1,6 +1,11 @@
 """
-BigFeat Benchmark Results Analysis (Refined)
-Analyze and visualize results with publication-quality outputs
+BigFeat Benchmark Results Analysis (Publication-Quality)
+Analyze and visualize results with advanced metrics:
+- Frequency Stratification (H/D/W/M/Q/Y)
+- Critical Difference (CD) Diagrams
+- Feature Discovery Heatmaps
+- Pareto Efficiency Frontier
+- Detector Sensitivity & Failure Analysis
 """
 
 import pandas as pd
@@ -9,11 +14,20 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import json
+import warnings
+from scipy.stats import wilcoxon, rankdata
+from datetime import datetime
 
 # Set style for publication-quality plots
 sns.set_style("whitegrid")
-plt.rcParams.update({'font.size': 11, 'figure.dpi': 100})
-
+plt.rcParams.update({
+    'font.size': 12,
+    'font.family': 'serif',
+    'figure.dpi': 300,
+    'savefig.bbox': 'tight',
+    'axes.grid': True,
+    'grid.alpha': 0.3
+})
 
 class BenchmarkAnalyzer:
     """Analyze BigFeat benchmark results with enhanced visualizations."""
@@ -25,568 +39,799 @@ class BenchmarkAnalyzer:
         if not self.summary_file.exists():
             raise FileNotFoundError(f"Summary file not found: {self.summary_file}")
 
+        print("Loading summary results...")
         self.df = pd.read_csv(self.summary_file)
+        
+        # Load enhanced metrics from JSONs
+        print("Loading detailed metrics from JSON logs...")
+        self._enrich_data_from_jsons()
 
         # Configuration names
         self.configs = [
-            'auto_dft', 'auto_acf', 'auto_lomb_scargle',
-            'yes_dft', 'yes_acf', 'yes_lomb_scargle',
-            'no_dft'
+            'auto_ensemble', 
+            'yes_dft', 'yes_acf', 'yes_lomb_scargle', 
+            'no_standard'
         ]
-
-        # Handle negative memory readings (memory released)
-        # Keep raw for analysis, clean for display
-        self.df_display = self.df.copy()
-        for col in self.df_display.columns:
-            if 'mem_mb' in col:
-                self.df_display[col] = self.df_display[col].apply(
-                    lambda x: max(0, x) if pd.notnull(x) else x
-                )
-
+        
+        # Define frequency mapping for clearer labels
+        self.freq_map = {
+            'H': 'Hourly', 'D': 'Daily', 'W': 'Weekly', 
+            'M': 'Monthly', 'Q': 'Quarterly', 'Y': 'Yearly'
+        }
+        # Normalize freq for plotting
+        if 'freq' in self.df.columns:
+            self.df['freq'] = self.df['freq'].str.upper()
+            self.df['freq_label'] = self.df['freq'].map(self.freq_map).fillna('Other')
+            
         print(f"Loaded results for {len(self.df)} datasets")
-        print(f"Configurations: {len(self.configs)} + baseline")
 
-    def summary_statistics(self):
-        """Print comprehensive summary statistics."""
-        output = []
-        output.append("\n" + "="*80)
-        output.append("SUMMARY STATISTICS")
-        output.append("="*80)
+    def _enrich_data_from_jsons(self):
+        """
+        Iterate over JSON result files to extract deep metrics not in CSV:
+        - Diversity Metrics (Autoregressive, Seasonal, etc.)
+        - Detector Confidence Details
+        """
+        diversity_rows = []
+        
+        for _, row in self.df.iterrows():
+            dataset = row['dataset']
+            json_path = self.results_dir / f"{dataset}_results.json"
+            
+            if not json_path.exists():
+                continue
+                
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                    
+                # Extract diversity metrics for BigFeat configs
+                for key, val in data.items():
+                    if key.startswith('bigfeat_') and isinstance(val, dict):
+                        config = key.replace('bigfeat_', '')
+                        
+                        # Get diversity metrics
+                        div = val.get('diversity_metrics', {})
+                        if div:
+                            diversity_rows.append({
+                                'dataset': dataset,
+                                'config': config,
+                                'diversity_total_ops': div.get('total_ops', 0),
+                                'diversity_autoregressive': div.get('autoregressive', 0),
+                                'diversity_volatility': div.get('volatility', 0),
+                                'diversity_trend': div.get('trend', 0),
+                                'diversity_seasonal': div.get('seasonal', 0),
+                                'diversity_complex': div.get('complex', 0)
+                            })
+                            
+            except Exception as e:
+                print(f"Warning: Failed to parse {json_path}: {e}")
+                
+        # Create DataFrame from new metrics
+        if diversity_rows:
+            self.diversity_df = pd.DataFrame(diversity_rows)
+            # Merge back into main DF? Or keep separate for specific plots?
+            # Keeping separate is cleaner for long-form analysis (heatmap)
+        else:
+            self.diversity_df = pd.DataFrame()
+            print("Warning: No diversity metrics found in JSONs (older run?)")
 
-        # 1. MASE comparison
-        output.append("\n1. MASE Performance (Lower is Better)")
-        output.append("-" * 70)
-        methods = ['baseline'] + self.configs
-        stats = []
-
-        for method in methods:
-            col = f'{method}_mase'
-            if col in self.df.columns:
-                values = self.df[col].dropna()
-                if len(values) > 0:
-                    stats.append({
-                        'Method': method,
-                        'Mean': values.mean(),
-                        'Median': values.median(),
-                        'Std': values.std(),
-                        'Min': values.min(),
-                        'Max': values.max(),
-                        'N': len(values)
-                    })
-
-        if stats:
-            stats_df = pd.DataFrame(stats).sort_values('Median')
-            output.append(stats_df.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-
-            # Save to CSV
-            stats_df.to_csv(self.results_dir / "mase_statistics.csv", index=False)
-
-        # 2. Win Rates
-        output.append("\n\n2. Win Rates vs Baseline")
-        output.append("-" * 70)
-        win_stats = []
-
-        for config in self.configs:
-            mase_col = f'{config}_mase'
-            if mase_col in self.df.columns:
-                mask = self.df[mase_col].notna() & self.df['baseline_mase'].notna()
-                wins = (self.df.loc[mask, mase_col] < self.df.loc[mask, 'baseline_mase']).sum()
-                total = mask.sum()
-
-                if total > 0:
-                    win_rate = wins / total * 100
-
-                    # Per-dataset improvements
-                    improvements = (
-                        (self.df.loc[mask, 'baseline_mase'] - self.df.loc[mask, mase_col]) /
-                        self.df.loc[mask, 'baseline_mase'] * 100
-                    )
-
-                    win_stats.append({
-                        'Config': config,
-                        'Wins': f'{wins}/{total}',
-                        'Win Rate %': win_rate,
-                        'Avg Improv %': improvements.mean(),
-                        'Median Improv %': improvements.median()
-                    })
-
-        if win_stats:
-            win_df = pd.DataFrame(win_stats).sort_values('Win Rate %', ascending=False)
-            output.append(win_df.to_string(index=False, float_format=lambda x: f"{x:.2f}"))
-
-            # Save to CSV
-            win_df.to_csv(self.results_dir / "win_rates.csv", index=False)
-
-        # 3. Resource Usage (Total)
-        output.append("\n\n3. Resource Usage (Total Pipeline)")
-        output.append("-" * 70)
-        resource_stats = []
-
-        for method in methods:
-            time_col = f'{method}_time'
-            cpu_col = f'{method}_cpu_pct'
-            mem_col = f'{method}_mem_mb'
-
-            if time_col in self.df.columns:
-                # Use display df for memory (non-negative)
-                resource_stats.append({
-                    'Method': method,
-                    'Time (s)': self.df[time_col].mean(),
-                    'CPU %': self.df[cpu_col].mean() if cpu_col in self.df.columns else np.nan,
-                    'Mem (MB)': self.df_display[mem_col].mean() if mem_col in self.df.columns else np.nan
-                })
-
-        if resource_stats:
-            resource_df = pd.DataFrame(resource_stats)
-            output.append(resource_df.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
-
-        # 4. BigFeat-Specific Resources
-        output.append("\n\n4. BigFeat Feature Engineering Overhead")
-        output.append("-" * 70)
-        bf_resource_stats = []
-
-        for config in self.configs:
-            bf_time_col = f'{config}_bf_time'
-            bf_cpu_col = f'{config}_bf_cpu_pct'
-            bf_mem_col = f'{config}_bf_mem_mb'
-
-            if bf_time_col in self.df.columns:
-                bf_resource_stats.append({
-                    'Config': config,
-                    'BF Time (s)': self.df[bf_time_col].mean(),
-                    'BF CPU %': self.df[bf_cpu_col].mean() if bf_cpu_col in self.df.columns else np.nan,
-                    'BF Mem (MB)': self.df_display[bf_mem_col].mean() if bf_mem_col in self.df.columns else np.nan,
-                    'Time Overhead (s)': self.df[bf_time_col].mean() - self.df['baseline_time'].mean()
-                })
-
-        if bf_resource_stats:
-            bf_df = pd.DataFrame(bf_resource_stats)
-            output.append(bf_df.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
-
-            # Save to CSV
-            bf_df.to_csv(self.results_dir / "bigfeat_overhead.csv", index=False)
-
-        # 5. Model Training Breakdown
-        output.append("\n\n5. Model Training Resource Breakdown")
-        output.append("-" * 70)
-        model_stats = []
-
-        if 'baseline_model_time' in self.df.columns:
-            model_stats.append({
-                'Method': 'baseline',
-                'Model Time (s)': self.df['baseline_model_time'].mean(),
-                'Model CPU %': self.df.get('baseline_model_cpu_pct', pd.Series([np.nan])).mean(),
-                'Prep Time (s)': self.df.get('baseline_prep_time', pd.Series([0])).mean()
-            })
-
-        for config in self.configs:
-            model_time_col = f'{config}_model_time'
-            bf_time_col = f'{config}_bf_time'
-
-            if model_time_col in self.df.columns:
-                model_stats.append({
-                    'Method': config,
-                    'Model Time (s)': self.df[model_time_col].mean(),
-                    'Model CPU %': self.df.get(f'{config}_model_cpu_pct', pd.Series([np.nan])).mean(),
-                    'FeatEng Time (s)': self.df[bf_time_col].mean() if bf_time_col in self.df.columns else np.nan
-                })
-
-        if model_stats:
-            model_df = pd.DataFrame(model_stats)
-            output.append(model_df.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
-
-        # 6. Time Series Detection
-        output.append("\n\n6. Time Series Detection (Auto Modes)")
-        output.append("-" * 70)
-
-        for detector in ['dft', 'acf', 'lomb_scargle']:
-            config = f'auto_{detector}'
-            ts_col = f'{config}_ts_enabled'
-            conf_col = f'{config}_ts_confidence'
-
-            if ts_col in self.df.columns:
-                enabled = self.df[ts_col].sum()
-                total = self.df[ts_col].notna().sum()
-
-                output.append(f"\n{detector.upper()}:")
-                output.append(f"  Enabled: {enabled}/{total} ({enabled/total*100:.1f}%)")
-
-                if conf_col in self.df.columns:
-                    enabled_mask = self.df[ts_col] == True
-                    if enabled_mask.sum() > 0:
-                        avg_conf = self.df.loc[enabled_mask, conf_col].mean()
-                        output.append(f"  Avg Confidence: {avg_conf:.2f}")
-
-        # Print everything
-        print("\n".join(output))
-        print("\n" + "="*80 + "\n")
-
-    def plot_performance_comparison(self, save_path: str = None):
-        """Generate publication-quality comparison plots."""
-        fig = plt.figure(figsize=(18, 12))
-        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-
-        methods = ['baseline'] + self.configs
-
-        # 1. MASE Boxplot with strip overlay
-        ax1 = fig.add_subplot(gs[0, 0])
+    # =========================================================================
+    # 1. FREQUENCY-STRATIFIED ANALYSIS
+    # =========================================================================
+    
+    def plot_faceted_boxplots(self, save_path=None):
+        """Plot MASE distribution faceted by frequency."""
+        print("\nGenering Frequency-Stratified Boxplots...")
+        
+        # Configs to compare
+        methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+        
+        # Melt DF for boxplot
         plot_data = []
         for method in methods:
             col = f'{method}_mase'
             if col in self.df.columns:
-                for val in self.df[col].dropna():
-                    plot_data.append({'Method': method, 'MASE': val})
+                temp_df = self.df[['dataset', 'freq_label', col]].copy()
+                temp_df.columns = ['dataset', 'Frequency', 'MASE']
+                # Clean up labels for plot
+                label = method.replace('yes_', '').replace('no_', '').replace('auto_', 'Auto ').replace('_', ' ').title()
+                if method == 'baseline': label = 'Baseline'
+                if method == 'tsfresh': label = 'TSFresh'
+                if method == 'openfe': label = 'OpenFE'
+                temp_df['Method'] = label
+                plot_data.append(temp_df)
+                
+        if not plot_data:
+            return
+            
+        plot_df = pd.concat(plot_data).reset_index(drop=True)
+        
+        # Define order: H -> Y
+        order = ['Hourly', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly']
+        plot_df['Frequency'] = pd.Categorical(plot_df['Frequency'], categories=order, ordered=True)
+        
+        # Expanded palette
+        palette = {
+            'Baseline': '#95a5a6',      # Gray
+            'TSFresh': '#e74c3c',       # Red
+            'OpenFE': '#2ecc71',        # Green
+            'Auto Ensemble': '#3498db', # Blue
+            'Dft': '#5dade2',           # Light Blue
+            'Acf': '#1abc9c',           # Teal
+            'Lomb Scargle': '#8e44ad',  # Purple
+            'Standard': '#f39c12'       # Orange
+        }
 
-        if plot_data:
-            plot_df = pd.DataFrame(plot_data)
+        g = sns.catplot(
+            data=plot_df, x='Method', y='MASE', col='Frequency', 
+            kind='box', col_wrap=3, height=4, aspect=1.2,
+            hue='Method', palette=palette,
+            showfliers=False, legend=False
+        )
+        
+        # Rotate x-labels to avoid overlap
+        for ax in g.axes.flat:
+            for label in ax.get_xticklabels():
+                label.set_rotation(45)
+                label.set_ha('right')
+        
+        g.fig.suptitle('MASE Performance by Frequency', y=1.02, fontweight='bold')
+        
+        out_path = save_path or (self.results_dir / 'frequency_stratified_performance.png')
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved faceted plot to {out_path} and PDF")
 
-            # Color palette: baseline grey, others blue
-            palette = {m: '#95a5a6' if m == 'baseline' else '#3498db' for m in methods}
+    def frequency_win_rates(self):
+        """Calculate win rates vs baseline per frequency."""
+        print("\nFrequency-Specific Win Rates (Auto Ensemble vs Baseline):")
+        print("-" * 60)
+        
+        if 'auto_ensemble_mase' not in self.df.columns:
+            return
 
-            sns.boxplot(x='Method', y='MASE', data=plot_df, ax=ax1, palette=palette,
-                       showfliers=False, width=0.6)
-            sns.stripplot(x='Method', y='MASE', data=plot_df, ax=ax1,
-                         color='black', alpha=0.3, size=3)
+        cols = ['dataset', 'freq_label', 'baseline_mase', 'auto_ensemble_mase']
+        data = self.df[cols].dropna()
+        
+        results = []
+        for freq in ['Hourly', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly']:
+            subset = data[data['freq_label'] == freq]
+            if len(subset) == 0:
+                continue
+                
+            wins = (subset['auto_ensemble_mase'] < subset['baseline_mase']).sum()
+            total = len(subset)
+            rate = (wins / total) * 100
+            
+            # Avg improvement
+            improv = (subset['baseline_mase'] - subset['auto_ensemble_mase']) / subset['baseline_mase'] * 100
+            
+            results.append({
+                'Frequency': freq,
+                'N': total,
+                'Win Rate': f"{rate:.1f}%",
+                'Avg Improv': f"{improv.mean():.1f}%"
+            })
+            
+        res_df = pd.DataFrame(results)
+        print(res_df.to_string(index=False))
+        return res_df
 
-            ax1.set_title('MASE Distribution', fontsize=13, fontweight='bold')
-            ax1.set_xlabel('')
-            ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45, ha='right', fontsize=9)
-            ax1.set_ylabel('MASE (Lower is Better)', fontsize=10)
-            ax1.grid(axis='y', alpha=0.3)
+    # =========================================================================
+    # 2. CRITICAL DIFFERENCE (CD) DIAGRAMS
+    # =========================================================================
 
-        # 2. Win Rate Bar Chart
-        ax2 = fig.add_subplot(gs[0, 1])
-        win_rates = []
+    def plot_cd_diagram(self, save_path=None):
+        """
+        Plot Critical Difference (CD) Diagram using Nemenyi test.
+        Visualizes statistical significance of rankings.
+        """
+        print("\nGenerating Critical Difference (CD) Diagram...")
+        
+        # Prepare ranking data
+        expected_methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+        
+        # Create a DataFrame for ranking with ALL expected methods
+        rank_data = {}
+        for m in expected_methods:
+             col = f'{m}_mase'
+             if col in self.df.columns:
+                 rank_data[col] = self.df[col]
+             else:
+                 # If column missing entirely, fill with infinity (worst rank)
+                 rank_data[col] = pd.Series([np.inf] * len(self.df), index=self.df.index)
+                 
+        rank_df = pd.DataFrame(rank_data)
+        
+        # Also fill any individual NaNs (failed runs) with infinity
+        rank_df = rank_df.fillna(np.inf)
+        
+        # Rank data (lower MASE = rank 1)
+        # methods with np.inf will get the average rank of the "worst" positions
+        ranks = rank_df.rank(axis=1, ascending=True)
+        avg_ranks = ranks.mean()
+        
+        # Filter out methods that failed on ALL datasets (optional, but requested to show them as last)
+        # If a method is all Inf, it will have max rank. We KEEP it.
+        
+        # Start validation for CD calculation
+        # Identify valid columns (columns that actully existed + ones we filled)
+        valid_cols = rank_df.columns.tolist()
+        
+        # Nemenyi Critical Difference Calculation
+        # CD = q_alpha * sqrt(k(k+1)/(6N))
+        # q_alpha for alpha=0.05 (two-tailed) 
+        # Source: Demšar (2006)
+        n_datasets = len(self.df)
+        k = len(valid_cols)
+        
+        # Lookup q_alpha for infinite df (approx)
+        q_alpha_lookup = {
+            2: 1.960, 3: 2.343, 4: 2.569, 5: 2.728, 
+            6: 2.850, 7: 2.949, 8: 3.031, 9: 3.102, 10: 3.164
+        }
+        q_val = q_alpha_lookup.get(k, 3.2) # fallback
+        
+        cd = q_val * np.sqrt((k * (k + 1)) / (6 * n_datasets))
+        
+        print(f"  N={n_datasets}, k={k}, CD={cd:.4f}")
+
+        # Plotting logic (simplified CD diagram)
+        # Sort methods by rank
+        sorted_ranks = avg_ranks.sort_values()
+        labels = [c.replace('_mase', '').replace('bigfeat_', '').replace('yes_', 'BF-').replace('auto_', 'BF-Auto-') for c in sorted_ranks.index]
+        values = sorted_ranks.values
+
+        plt.figure(figsize=(10, 4))
+        
+        # Limits
+        low_lim = 1
+        high_lim = k
+        
+        # Draw axis
+        plt.hlines(0, low_lim, high_lim, colors='k', linewidth=2)
+        
+        # Draw tick marks
+        for x in range(low_lim, high_lim + 1):
+            plt.vlines(x, -0.05, 0.05, colors='k')
+            plt.text(x, 0.1, str(x), ha='center', va='bottom', fontsize=10)
+            
+        plt.text(low_lim, 0.2, 'Average Rank (Lower is Better)', ha='left', va='center', fontweight='bold')
+        
+        # Critical Difference Bar
+        plt.hlines(0.5, low_lim, low_lim + cd, colors='r', linewidth=3)
+        plt.text(low_lim + cd/2, 0.6, f'CD = {cd:.2f}', ha='center', va='bottom', color='r', fontweight='bold')
+        
+        # Plot methods
+        # Use simple offset strategy to avoid overlap
+        y_offsets = [0, -0.6, -1.2, -1.8, -2.4, -3.0, -3.6, -4.2]
+        
+        for i, (rank, label) in enumerate(zip(values, labels)):
+            # Draw line to axis
+            plt.plot([rank, rank], [0, 0], 'ko', markersize=5)
+            
+            # Simple text placement
+            y_pos = -0.5 - (i % 4) * 0.4 # Stagger
+            # Draw connecting line
+            plt.plot([rank, rank], [0, y_pos], 'k-', alpha=0.3, linewidth=1)
+            plt.text(rank, y_pos - 0.1, f'{label}\n{rank:.2f}', ha='center', va='top', fontsize=9, 
+                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+        # Add Title
+        plt.title('Critical Difference (CD) Diagram (Nemenyi Test, p<0.05)', pad=40, fontweight='bold')
+        plt.axis('off')
+        
+        out_path = save_path or (self.results_dir / 'cd_diagram.png')
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved CD diagram to {out_path} and PDF")
+
+    # =========================================================================
+    # 3. FEATURE DISCOVERY HEATMAP
+    # =========================================================================
+    
+    def plot_feature_discovery(self, save_path=None):
+        """Plot heatmap of discovered feature types across datasets."""
+        print("\nGenerating Feature Discovery Heatmap...")
+        
+        if self.diversity_df.empty:
+            print("Skipping heatmap: No diversity metrics found.")
+            return
+            
+        # Focus on auto_ensemble
+        df_auto = self.diversity_df[self.diversity_df['config'] == 'auto_ensemble'].copy()
+        
+        if df_auto.empty:
+            return
+
+        # Normalize counts to percentages per dataset
+        feat_cols = ['diversity_autoregressive', 'diversity_volatility', 'diversity_trend', 'diversity_seasonal', 'diversity_complex']
+        labels = ['Autoregressive', 'Volatility', 'Trend', 'Seasonal', 'Complex']
+        
+        # Calculate total
+        df_auto['total'] = df_auto[feat_cols].sum(axis=1)
+        
+        heatmap_data = []
+        full_labels = []
+        
+        # Sort by total features
+        df_auto = df_auto.sort_values('total', ascending=False)
+        
+        # Prepare matrix
+        data_matrix = df_auto[feat_cols].values
+        # Row normalization (percentage of features)
+        row_sums = data_matrix.sum(axis=1, keepdims=True)
+        # Avoid div w zero
+        row_sums[row_sums == 0] = 1
+        data_norm = (data_matrix / row_sums) * 100
+        
+        plt.figure(figsize=(10, 12))
+        sns.heatmap(data_norm, cmap='viridis', annot=True, fmt='.0f', 
+                   xticklabels=labels, yticklabels=df_auto['dataset'],
+                   cbar_kws={'label': '% of Generated Features'})
+        
+        plt.title('Feature Discovery Profile (Auto Ensemble)', pad=20, fontweight='bold')
+        plt.xlabel('Operator Category')
+        plt.ylabel('Dataset')
+        
+        out_path = save_path or (self.results_dir / 'feature_discovery_heatmap.png')
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved heatmap to {out_path} and PDF")
+
+    # =========================================================================
+    # 4. DETECTOR SENSITIVITY
+    # =========================================================================
+    
+    def plot_detector_sensitivity(self, save_path=None):
+        """Analyze detector behavior: Confidence vs Wins."""
+        print("\nGenerating Detector Sensitivity Plots...")
+        
+        # 1. DFT vs ACF Confidence
+        plt.figure(figsize=(8, 6))
+        
+        dft_col = 'auto_dft_ts_confidence' # Assuming individual run data exists or we use what we have
+        # Wait, usually we run 'auto_ensemble'. 
+        # If we have 'yes_dft' and 'yes_acf', we don't have their CONFIDENCE unless we inspect logs.
+        # But 'auto_ensemble' logs the confidence of the SELECTED winner.
+        
+        # Let's plot Auto Ensemble confidence vs Performance Gain
+        if 'auto_ensemble_ts_confidence' in self.df.columns and 'baseline_mase' in self.df.columns:
+            
+            df_plot = self.df.dropna(subset=['auto_ensemble_ts_confidence']).copy()
+            df_plot['Improvement'] = (df_plot['baseline_mase'] - df_plot['auto_ensemble_mase']) / df_plot['baseline_mase'] * 100
+            
+            sns.scatterplot(data=df_plot, x='auto_ensemble_ts_confidence', y='Improvement', 
+                           hue='freq_label', style='freq_label', s=100, palette='deep')
+            
+            plt.axhline(0, color='r', linestyle='--', alpha=0.5)
+            plt.title('Detector Confidence vs. Performance Improvement')
+            plt.xlabel('Ensemble Detector Confidence')
+            plt.ylabel('MASE Improvement (%)')
+            
+            out_path = save_path or (self.results_dir / 'detector_confidence_impact.png')
+            plt.savefig(out_path, dpi=300, bbox_inches='tight')
+            plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+            print(f"✓ Saved sensitivity plot to {out_path} and PDF")
+
+    def plot_stationarity_impact(self, save_path=None):
+        """Analyze how Stationarity (avg_lag1) affects Trend vs Seasonal features."""
+        print("\nGenerating Stationarity Impact Plot...")
+        
+        # We need avg_lag1 from CSV (if available) and diversity metrics from JSON
+        if self.diversity_df.empty:
+            print("Skipping stationarity impact: No diversity metrics.")
+            return
+            
+        # Merge diversity data with avg_lag1 from summary DF
+        cols_needed = ['dataset', 'auto_ensemble_ts_avg_lag1']
+        if 'auto_ensemble_ts_avg_lag1' not in self.df.columns:
+            print("Skipping stationarity impact: 'auto_ensemble_ts_avg_lag1' not in CSV.")
+            return
+            
+        df_merged = pd.merge(self.df[cols_needed], 
+                            self.diversity_df[self.diversity_df['config'] == 'auto_ensemble'],
+                            on='dataset')
+                            
+        if df_merged.empty:
+            return
+            
+        # Calculate Trend/Seasonal Ratio
+        # (Trend + Volatility) vs (Seasonal)
+        # Or just Trend %
+        df_merged['total'] = df_merged[['diversity_trend', 'diversity_seasonal', 'diversity_volatility', 'diversity_autoregressive', 'diversity_complex']].sum(axis=1)
+        df_merged['trend_pct'] = (df_merged['diversity_trend'] / df_merged['total']) * 100
+        df_merged['seasonal_pct'] = (df_merged['diversity_seasonal'] / df_merged['total']) * 100
+        
+        plt.figure(figsize=(10, 6))
+        
+        # Plot Trend % vs Lag1
+        sns.regplot(data=df_merged, x='auto_ensemble_ts_avg_lag1', y='trend_pct', 
+                   label='Trend Features', scatter_kws={'alpha':0.6}, color='#e67e22')
+                   
+        # Plot Seasonal % vs Lag1
+        sns.regplot(data=df_merged, x='auto_ensemble_ts_avg_lag1', y='seasonal_pct', 
+                   label='Seasonal Features', scatter_kws={'alpha':0.6}, color='#3498db')
+        
+        plt.title('Impact of Stationarity (Lag-1 Autocorrelation) on Feature Discovery')
+        plt.xlabel('Average Lag-1 Autocorrelation (High = Non-Stationary)')
+        plt.ylabel('% of Generated Features')
+        plt.legend()
+        
+        out_path = save_path or (self.results_dir / 'stationarity_impact.png')
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved stationarity impact plot to {out_path} and PDF")
+
+    # =========================================================================
+    # 5. EFFICIENCY FRONTIER (PARETO)
+    # =========================================================================
+    
+    def plot_efficiency_frontier(self, save_path=None):
+        """Identify and plot Pareto Optimal configurations."""
+        print("\nGenerating Efficiency Frontier...")
+        
+        methods = self.configs
+        avg_mase = []
+        avg_time = []
         labels = []
+        
+        for m in methods:
+            m_mase = f'{m}_mase'
+            m_time = f'{m}_time'
+            if m_mase in self.df.columns:
+                avg_mase.append(self.df[m_mase].mean())
+                avg_time.append(self.df[m_time].mean())
+                labels.append(m)
+        
+        # Add baseline & tsfresh
+        if 'baseline_mase' in self.df.columns:
+            avg_mase.append(self.df['baseline_mase'].mean())
+            avg_time.append(self.df['baseline_time'].mean())
+            labels.append('baseline')
+            
+        if 'tsfresh_mase' in self.df.columns:
+            avg_mase.append(self.df['tsfresh_mase'].mean())
+            avg_time.append(self.df['tsfresh_time'].mean())
+            labels.append('tsfresh')
 
-        for config in self.configs:
-            mase_col = f'{config}_mase'
-            if mase_col in self.df.columns:
-                mask = self.df[mase_col].notna() & self.df['baseline_mase'].notna()
-                if mask.sum() > 0:
-                    wins = (self.df.loc[mask, mase_col] < self.df.loc[mask, 'baseline_mase']).sum()
-                    win_rates.append(wins / mask.sum() * 100)
-                    labels.append(config)
-
-        if win_rates:
-            # Color: green if >= 50%, red otherwise
-            colors = ['#27ae60' if x >= 50 else '#e74c3c' for x in win_rates]
-            bars = ax2.bar(range(len(labels)), win_rates, color=colors, alpha=0.8, width=0.7)
-
-            ax2.axhline(50, color='grey', linestyle='--', alpha=0.5, linewidth=1)
-            ax2.set_title('Win Rate vs Baseline', fontsize=13, fontweight='bold')
-            ax2.set_ylabel('Win Rate (%)', fontsize=10)
-            ax2.set_ylim(0, 100)
-            ax2.set_xticks(range(len(labels)))
-            ax2.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
-            ax2.grid(axis='y', alpha=0.3)
-
-            # Add percentage labels on bars
-            for i, (bar, rate) in enumerate(zip(bars, win_rates)):
-                height = bar.get_height()
-                ax2.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{rate:.0f}%', ha='center', va='bottom', fontsize=8)
-
-        # 3. Efficiency Scatter
-        ax3 = fig.add_subplot(gs[0, 2])
-        scatter_data = []
-
-        for config in self.configs:
-            mase_col = f'{config}_mase'
-            time_col = f'{config}_time'
-
-            if mase_col in self.df.columns and time_col in self.df.columns:
-                mask = self.df[mase_col].notna() & self.df['baseline_mase'].notna()
-                if mask.sum() > 0:
-                    avg_imp = ((self.df.loc[mask, 'baseline_mase'] - self.df.loc[mask, mase_col]) /
-                              self.df.loc[mask, 'baseline_mase'] * 100).mean()
-                    avg_time = self.df.loc[mask, time_col].mean()
-
-                    scatter_data.append({
-                        'Config': config,
-                        'Improvement': avg_imp,
-                        'Time': avg_time,
-                        'Mode': 'auto' if 'auto' in config else ('yes' if 'yes' in config else 'no')
-                    })
-
-        if scatter_data:
-            sc_df = pd.DataFrame(scatter_data)
-
-            # Color by mode
-            mode_colors = {'auto': '#3498db', 'yes': '#2ecc71', 'no': '#e67e22'}
-
-            for mode, color in mode_colors.items():
-                mask = sc_df['Mode'] == mode
-                if mask.sum() > 0:
-                    ax3.scatter(sc_df.loc[mask, 'Time'], sc_df.loc[mask, 'Improvement'],
-                               color=color, s=100, alpha=0.7, label=f'Mode: {mode}', edgecolors='black')
-
-            # Baseline reference
-            if 'baseline_time' in self.df.columns:
-                baseline_time = self.df['baseline_time'].mean()
-                ax3.scatter(baseline_time, 0, color='#95a5a6', marker='*', s=300,
-                           label='Baseline', edgecolors='black', linewidths=1.5)
-
-            ax3.axhline(0, color='grey', linestyle='-', alpha=0.3, linewidth=1)
-            ax3.set_title('Efficiency Frontier', fontsize=13, fontweight='bold')
-            ax3.set_xlabel('Runtime (seconds)', fontsize=10)
-            ax3.set_ylabel('MASE Improvement (%)', fontsize=10)
-            ax3.legend(fontsize=8, loc='best')
-            ax3.grid(alpha=0.3)
-
-        # 4. Time Breakdown (Stacked Bar)
-        ax4 = fig.add_subplot(gs[1, :2])
-        configs_with_breakdown = [c for c in self.configs if f'{c}_bf_time' in self.df.columns]
-
-        if configs_with_breakdown:
-            bf_times = [self.df[f'{c}_bf_time'].mean() for c in configs_with_breakdown]
-            total_times = [self.df[f'{c}_time'].mean() for c in configs_with_breakdown]
-            model_times = [total - bf for total, bf in zip(total_times, bf_times)]
-
-            x = np.arange(len(configs_with_breakdown))
-            width = 0.6
-
-            ax4.bar(x, bf_times, width, label='BigFeat', color='#3498db', alpha=0.8)
-            ax4.bar(x, model_times, width, bottom=bf_times, label='Model + Overhead',
-                   color='#e67e22', alpha=0.8)
-
-            # Baseline reference line
-            if 'baseline_time' in self.df.columns:
-                baseline_time = self.df['baseline_time'].mean()
-                ax4.axhline(baseline_time, color='#95a5a6', linestyle='--',
-                           linewidth=2, label='Baseline Total', alpha=0.7)
-
-            ax4.set_ylabel('Time (seconds)', fontsize=10)
-            ax4.set_title('Time Breakdown: BigFeat vs Model Training', fontsize=13, fontweight='bold')
-            ax4.set_xticks(x)
-            ax4.set_xticklabels(configs_with_breakdown, rotation=45, ha='right', fontsize=9)
-            ax4.legend(fontsize=9)
-            ax4.grid(axis='y', alpha=0.3)
-
-        # 5. Memory Breakdown
-        ax5 = fig.add_subplot(gs[1, 2])
-
-        if configs_with_breakdown:
-            bf_mem = [self.df_display[f'{c}_bf_mem_mb'].mean() for c in configs_with_breakdown]
-            total_mem = [self.df_display[f'{c}_mem_mb'].mean() for c in configs_with_breakdown]
-            other_mem = [max(0, total - bf) for total, bf in zip(total_mem, bf_mem)]
-
-            ax5.bar(x, bf_mem, width, label='BigFeat', color='#16a085', alpha=0.8)
-            ax5.bar(x, other_mem, width, bottom=bf_mem, label='Model + Other',
-                   color='#f39c12', alpha=0.8)
-
-            # Baseline reference
-            if 'baseline_mem_mb' in self.df_display.columns:
-                baseline_mem = self.df_display['baseline_mem_mb'].mean()
-                ax5.axhline(baseline_mem, color='#95a5a6', linestyle='--',
-                           linewidth=2, label='Baseline', alpha=0.7)
-
-            ax5.set_ylabel('Memory (MB)', fontsize=10)
-            ax5.set_title('Memory Breakdown', fontsize=13, fontweight='bold')
-            ax5.set_xticks(x)
-            ax5.set_xticklabels(configs_with_breakdown, rotation=45, ha='right', fontsize=9)
-            ax5.legend(fontsize=9)
-            ax5.grid(axis='y', alpha=0.3)
-
-        # 6. Efficiency (MASE improvement per second)
-        ax6 = fig.add_subplot(gs[2, :])
-
-        if configs_with_breakdown:
-            efficiencies = []
-            labels_eff = []
-
-            for config in configs_with_breakdown:
-                mase_col = f'{config}_mase'
-                time_col = f'{config}_bf_time'
-
-                if mase_col in self.df.columns and time_col in self.df.columns:
-                    mask = (self.df[mase_col].notna() &
-                           self.df['baseline_mase'].notna() &
-                           self.df[time_col].notna())
-
-                    if mask.sum() > 0:
-                        mase_improvement = (self.df.loc[mask, 'baseline_mase'] -
-                                          self.df.loc[mask, mase_col]).mean()
-                        avg_time = self.df.loc[mask, time_col].mean()
-
-                        if avg_time > 0:
-                            efficiency = mase_improvement / avg_time
-                            efficiencies.append(efficiency)
-                            labels_eff.append(config)
-
-            if efficiencies:
-                colors_eff = ['#27ae60' if e > 0 else '#e74c3c' for e in efficiencies]
-                bars = ax6.barh(range(len(labels_eff)), efficiencies, color=colors_eff, alpha=0.8)
-
-                ax6.set_xlabel('MASE Improvement per Second', fontsize=10)
-                ax6.set_title('Efficiency: Performance Gain per Time Unit', fontsize=13, fontweight='bold')
-                ax6.set_yticks(range(len(labels_eff)))
-                ax6.set_yticklabels(labels_eff, fontsize=9)
-                ax6.axvline(0, color='black', linestyle='-', linewidth=1)
-                ax6.grid(axis='x', alpha=0.3)
-
-        plt.suptitle('BigFeat Benchmark Comprehensive Analysis',
-                    fontsize=16, fontweight='bold', y=0.995)
-
-        out_path = save_path or (self.results_dir / 'comprehensive_analysis.png')
+        if 'openfe_mase' in self.df.columns:
+            avg_mase.append(self.df['openfe_mase'].mean())
+            avg_time.append(self.df['openfe_time'].mean())
+            labels.append('openfe')
+            
+        # Identify Pareto Frontier
+        # A point (t, m) dominates (t', m') if t <= t' AND m <= m' AND (t < t' OR m < m')
+        # We want to MINIMIZE Time and MINIMIZE MASE.
+        points = sorted(zip(avg_time, avg_mase, labels))
+        pareto = []
+        
+        current_min_mase = float('inf')
+        for t, m, l in points:
+            if m < current_min_mase:
+                pareto.append((t, m, l))
+                current_min_mase = m
+                
+        # Plot
+        plt.figure(figsize=(10, 6))
+        
+        # Plot all points
+        plt.scatter(avg_time, avg_mase, c='grey', s=50, alpha=0.6, label='Sub-optimal')
+        
+        # Highlight Pareto
+        px, py, pl = zip(*pareto)
+        plt.plot(px, py, 'b--', alpha=0.5)
+        plt.scatter(px, py, c='#2ecc71', s=150, zorder=5, label='Pareto Optimal')
+        
+        # Annotate
+        for t, m, l in zip(avg_time, avg_mase, labels):
+            weight = 'bold' if l in pl else 'normal'
+            plt.annotate(l.replace('bigfeat_', '').replace('auto_', 'Auto-').replace('yes_', ''), 
+                        (t, m), xytext=(5, 5), textcoords='offset points', fontweight=weight)
+            
+        plt.title('Efficiency Frontier (Pareto Analysis)', fontweight='bold')
+        plt.xlabel('Average Runtime (s) [Lower is Better]')
+        plt.ylabel('Average MASE [Lower is Better]')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        out_path = save_path or (self.results_dir / 'efficiency_frontier.png')
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
-        print(f"✓ Saved comprehensive plot to {out_path}")
-        plt.close()
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved efficiency frontier to {out_path} and PDF")
 
-    def plot_detector_comparison(self, save_path: str = None):
-        """Compare different detectors across modes."""
-        fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-
-        modes = ['auto', 'yes', 'no']
-        detectors = ['dft', 'acf', 'lomb_scargle']
-
-        for idx, mode in enumerate(modes):
-            ax = axes[idx]
-
-            if mode == 'no':
-                config = 'no_dft'
-                mase_col = f'{config}_mase'
-                if mase_col in self.df.columns:
-                    values = self.df[mase_col].dropna()
-                    bp = ax.boxplot([values], labels=['dft'], patch_artist=True,
-                                   widths=0.5, showfliers=False)
-                    for patch in bp['boxes']:
-                        patch.set_facecolor('#3498db')
-            else:
-                mase_data = []
-                labels = []
-
-                for detector in detectors:
-                    config = f'{mode}_{detector}'
-                    mase_col = f'{config}_mase'
-
-                    if mase_col in self.df.columns:
-                        values = self.df[mase_col].dropna()
-                        if len(values) > 0:
-                            mase_data.append(values)
-                            labels.append(detector)
-
-                if mase_data:
-                    bp = ax.boxplot(mase_data, labels=labels, patch_artist=True,
-                                   widths=0.5, showfliers=False)
-                    colors = ['#3498db', '#2ecc71', '#e67e22']
-                    for patch, color in zip(bp['boxes'], colors[:len(bp['boxes'])]):
-                        patch.set_facecolor(color)
-
-            ax.set_ylabel('MASE', fontsize=11)
-            ax.set_title(f"Mode: '{mode}'", fontsize=13, fontweight='bold')
-            ax.grid(axis='y', alpha=0.3)
-            ax.tick_params(axis='x', labelsize=10)
-
-        plt.suptitle('Detector Comparison Across Modes', fontsize=14, fontweight='bold')
-        plt.tight_layout()
-
-        out_path = save_path or (self.results_dir / 'detector_comparison.png')
+    # =========================================================================
+    # 6. SCALABILITY & FAILURE ANALYSIS
+    # =========================================================================
+    
+    def plot_scalability(self, save_path=None):
+        """Plot Runtime vs Total Timesteps."""
+        print("\nGenerating Scalability Plot...")
+        
+        method = 'auto_ensemble'
+        time_col = f'{method}_bf_time' # Feature Eng time only
+        
+        if time_col not in self.df.columns or 'n_series' not in self.df.columns:
+            return
+            
+        plt.figure(figsize=(10, 6))
+        
+        # Filter failures (time=0 or null)
+        df_valid = self.df[self.df[time_col] > 0].copy()
+        
+        # Calculate features generated (total work = series * timesteps? No, BigFeat scales with n_series mostly)
+        # Let's plot vs n_series * pred_length (total prediction points) or just n_series.
+        # Ideally total_timesteps if available.
+        
+        # We need to estimate total timesteps if not provided
+        # metadata usually has 'total_timesteps' if we loaded JSONs... 
+        # But CSV has 'n_series' and 'pred_length'.
+        # Let's use 'n_series' as primary scaling factor for now (Series-Independence).
+        
+        sns.scatterplot(data=df_valid, x='n_series', y=time_col, 
+                       hue='freq_label', size='pred_length', sizes=(20, 200),
+                       alpha=0.7, palette='viridis')
+        
+        # Fit linear or log trend
+        x = df_valid['n_series']
+        y = df_valid[time_col]
+        
+        # Plot y=x reference (Linear scaling)
+        # plt.plot([x.min(), x.max()], [y.min(), y.max()], 'k--', alpha=0.3, label='Linear Reference')
+        
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.title(f'Scalability: {method} Runtime vs Dataset Size')
+        plt.xlabel('Number of Series (Log Scale)')
+        plt.ylabel('Feature Engineering Time (s) (Log Scale)')
+        
+        out_path = save_path or (self.results_dir / 'scalability.png')
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
-        print(f"✓ Saved detector comparison to {out_path}")
-        plt.close()
+        plt.savefig(str(out_path).replace('.png', '.pdf'), format='pdf', bbox_inches='tight')
+        print(f"✓ Saved scalability plot to {out_path} and PDF")
 
-    def best_configuration_per_dataset(self):
-        """Find best configuration for each dataset."""
-        configs = ['baseline'] + self.configs
-        mase_cols = [f'{c}_mase' for c in configs]
-
-        valid_cols = [c for c in mase_cols if c in self.df.columns]
-
-        if not valid_cols:
-            return pd.DataFrame()
-
-        self.df['best_config_col'] = self.df[valid_cols].idxmin(axis=1)
-        self.df['best_config'] = self.df['best_config_col'].str.replace('_mase', '')
-        self.df['best_mase'] = self.df[valid_cols].min(axis=1)
-
-        print("\n" + "="*80)
-        print("BEST CONFIGURATION WINS")
+    def analyze_failures(self):
+        """Identify and report failure modes (Auto worse than baseline or standard)."""
+        print("\nFAILURE MODE ANALYSIS")
         print("="*80)
-        winner_counts = self.df['best_config'].value_counts()
-        print(winner_counts.to_string())
+        
+        if 'auto_ensemble_mase' not in self.df.columns:
+            return
 
-        # Save to CSV
-        winner_counts.to_csv(self.results_dir / "best_config_counts.csv", header=['Count'])
+        # 1. Regressions vs Baseline (> 10% degradation)
+        regressions = self.df[self.df['auto_ensemble_mase'] > self.df['baseline_mase'] * 1.1]
+        
+        print(f"\nSignificant Regressions (Auto > Baseline + 10%)")
+        print("-" * 60)
+        
+        if not regressions.empty:
+            cols = ['dataset', 'freq_label', 'baseline_mase', 'auto_ensemble_mase']
+            if 'auto_ensemble_ts_confidence' in self.df.columns:
+                cols.append('auto_ensemble_ts_confidence')
+                
+            print(regressions[cols].to_string(index=False))
+            
+            # Correlation check
+            if 'auto_ensemble_ts_confidence' in self.df.columns:
+                avg_conf_fail = regressions['auto_ensemble_ts_confidence'].mean()
+                print(f"\nAverage Confidence in Failing Datasets: {avg_conf_fail:.2f}")
+        else:
+            print("None found.")
 
-        return self.df[['dataset', 'best_config', 'best_mase']]
+    # =========================================================================
+    # MAIN REPORT GENERATION
+    # =========================================================================
 
-    def export_report(self, output_file: str = None):
-        """Export detailed analysis report."""
-        if output_file is None:
-            output_file = self.results_dir / "analysis_report.txt"
+    def summary_statistics(self):
+        """Print standard summary statistics."""
+        # Using the base logic but keeping it simple for now
+        print("\nSUMMARY MASE STATISTICS")
+        print("-" * 60)
+        
+        methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+        stats = []
+        for m in methods:
+            col = f'{m}_mase'
+            if col in self.df.columns:
+                vals = self.df[col].dropna()
+                stats.append({
+                    'Method': m,
+                    'Mean': vals.mean(),
+                    'Median': vals.median(),
+                    'Std': vals.std()
+                })
+        print(pd.DataFrame(stats).to_string(index=False))
 
-        with open(output_file, 'w') as f:
-            f.write("="*80 + "\n")
+    def export_report(self):
+        """Export comprehensive analysis report to text file."""
+        report_path = self.results_dir / "analysis_report.txt"
+        print(f"\nExporting analysis report to {report_path}...")
+        
+        with open(report_path, "w") as f:
             f.write("BIGFEAT BENCHMARK ANALYSIS REPORT\n")
             f.write("="*80 + "\n\n")
-
-            # Include all analysis sections
-            methods = ['baseline'] + self.configs
-
-            # MASE Summary
-            f.write("1. MASE PERFORMANCE SUMMARY\n")
-            f.write("-"*50 + "\n")
-            for method in methods:
-                col = f'{method}_mase'
+            f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            # 1. Summary Statistics
+            f.write("1. SUMMARY STATISTICS (MASE)\n")
+            f.write("-" * 60 + "\n")
+            methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+            stats = []
+            for m in methods:
+                col = f'{m}_mase'
                 if col in self.df.columns:
-                    values = self.df[col].dropna()
-                    if len(values) > 0:
-                        f.write(f"\n{method}:\n")
-                        f.write(f"  Mean: {values.mean():.4f}\n")
-                        f.write(f"  Median: {values.median():.4f}\n")
-                        f.write(f"  Std: {values.std():.4f}\n")
-                        f.write(f"  Range: [{values.min():.4f}, {values.max():.4f}]\n")
+                    vals = self.df[col].dropna()
+                    stats.append({
+                        'Method': m,
+                        'Mean': vals.mean(),
+                        'Median': vals.median(),
+                        'Std': vals.std()
+                    })
+            if stats:
+                f.write(pd.DataFrame(stats).to_string(index=False))
+            f.write("\n\n")
+            
+            # 2. Frequency Win Rates
+            f.write("2. FREQUENCY-SPECIFIC WIN RATES (Auto vs Baseline)\n")
+            f.write("-" * 60 + "\n")
+            win_df = self.frequency_win_rates()
+            if win_df is not None and not win_df.empty:
+               f.write(win_df.to_string(index=False))
+            f.write("\n\n")
+            
+            # 3. Failure Analysis
+            f.write("3. FAILURE MODE ANALYSIS (Auto > Baseline + 10%)\n")
+            f.write("-" * 60 + "\n")
+            if 'auto_ensemble_mase' in self.df.columns:
+                regressions = self.df[self.df['auto_ensemble_mase'] > self.df['baseline_mase'] * 1.1]
+                if not regressions.empty:
+                    cols = ['dataset', 'freq_label', 'baseline_mase', 'auto_ensemble_mase']
+                    if 'auto_ensemble_ts_confidence' in self.df.columns:
+                        cols.append('auto_ensemble_ts_confidence')
+                    f.write(regressions[cols].to_string(index=False))
+                    
+                    if 'auto_ensemble_ts_confidence' in self.df.columns:
+                        avg_conf = regressions['auto_ensemble_ts_confidence'].mean()
+                        f.write(f"\n\nAverage Confidence in Failing Datasets: {avg_conf:.2f}")
+                else:
+                    f.write("None found.")
+            f.write("\n\n")
 
-            # Best configs
-            f.write("\n\n2. BEST CONFIGURATION PER DATASET\n")
-            f.write("-"*50 + "\n")
-            best_df = self.best_configuration_per_dataset()
-            f.write(best_df.to_string(index=False))
+            f.write("="*80 + "\n")
+            f.write("End of Report\n")
+            
+        print("✓ Report exported.")
+        
+    def export_rankings(self):
+        """Calculate and export rankings and win counts."""
+        print("\nExporting rankings...")
+        methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+        valid_cols = [f'{m}_mase' for m in methods if f'{m}_mase' in self.df.columns]
+        
+        if not valid_cols:
+             return
 
-            f.write("\n\n3. CONFIGURATION RANKINGS\n")
-            f.write("-"*50 + "\n")
-            f.write(self.df['best_config'].value_counts().to_string())
+        # 1. Average Rank
+        ranks = self.df[valid_cols].rank(axis=1, ascending=True)
+        avg_ranks = ranks.mean().sort_values()
+        
+        # Save to CSV
+        avg_ranks.to_csv(self.results_dir / "average_rankings.csv", header=['Average Rank'])
+        print(f"✓ Saved average rankings to {self.results_dir / 'average_rankings.csv'}")
 
-        print(f"✓ Report saved to {output_file}")
+        # 2. Best Counts
+        best_counts = ranks.idxmin(axis=1).value_counts()
+        best_counts.index = [c.replace('_mase', '') for c in best_counts.index]
+        best_counts.to_csv(self.results_dir / "best_config_counts.csv", header=['Wins'])
+        print(f"✓ Saved win counts to {self.results_dir / 'best_config_counts.csv'}")
 
+    def analyze_compactness(self):
+        """Analyze feature efficiency (Compactness Argument)."""
+        # Append to report
+        report_path = self.results_dir / "analysis_report.txt"
+        
+        with open(report_path, "a") as f:
+            f.write("4. COMPACTNESS ARGUMENT (Feature Efficiency)\n")
+            f.write("-" * 60 + "\n")
+            
+            methods = ['baseline', 'tsfresh', 'openfe'] + self.configs
+            data = []
+            
+            for m in methods:
+                 feat_col = f'{m}_n_features'
+                 mase_col = f'{m}_mase'
+                 
+                 # Handling slightly different column names in CSV
+                 if m == 'baseline': feat_col = 'baseline_n_features' # Actually it is just n_features sometimes? No, csv has baseline_n_features?
+                 # Let's check CSV columns in mind... benchmark.py writes 'baseline_n_features'? 
+                 # Wait, benchmark.py L1082: 'Features: {baseline_results['n_features']}' is printed.
+                 # summary_df row logic?
+                 # L1301: baseline logic doesn't explicitly save n_features to row? 
+                 # L1302: if 'baseline' in result... 
+                 # Actually, benchmark.py DOES NOT seem to export baseline n_features to summary CSV in the logic I saw earlier (L1301-1313).
+                 # Verify?
+                 pass 
+                 
+            # Re-reading benchmark.py logic:
+            # L1314+: BigFeat loop exports n_features_generated -> row[f'{config_name}_n_features']
+            # L1346+: tsfresh exports n_features -> row['tsfresh_n_features']
+            
+            # So we have feature counts for BigFeat and tsfresh. Baseline is always 1 (original series) or K features?
+            # Baseline (rf/ridge) usually takes prepared features... but we generally consider raw features.
+            
+            for m in methods:
+                 if m == 'baseline': 
+                     # Baseline usually implies raw features, let's assume raw features count from metadata or similar.
+                     # Actually, let's skip baseline for compactness features comparison if data missing.
+                     # But we definitely want to compare Auto vs tsfresh.
+                     continue
+                     
+                 feat_col = f'{m}_n_features'
+                 mase_col = f'{m}_mase'
+                 
+                 if feat_col in self.df.columns and mase_col in self.df.columns:
+                     avg_feat = self.df[feat_col].mean()
+                     avg_mase = self.df[mase_col].mean()
+                     
+                     data.append({
+                         'Method': m,
+                         'Avg Features': f"{avg_feat:.1f}",
+                         'Avg MASE': f"{avg_mase:.4f}"
+                     })
+                     
+            if data:
+                f.write(pd.DataFrame(data).to_string(index=False))
+            f.write("\n\n")
+            
+            f.write("="*80 + "\n")
+            f.write("End of Report (Updated)\n")
+            
+        print("✓ Compactness analysis appended to report.")
 
 def main():
-    """Main analysis script."""
     import argparse
-
     parser = argparse.ArgumentParser(description="Analyze BigFeat benchmark results")
     parser.add_argument('--results-dir', default='./benchmark_results', help='Results directory')
-    parser.add_argument('--plot', action='store_true', help='Generate plots')
-    parser.add_argument('--report', action='store_true', help='Export detailed report')
-
     args = parser.parse_args()
 
-    # Load and analyze
-    analyzer = BenchmarkAnalyzer(args.results_dir)
-
-    # Print summary statistics
-    analyzer.summary_statistics()
-
-    # Best configuration analysis
-    print("\n")
-    best_df = analyzer.best_configuration_per_dataset()
-    print("\nTop 10 Best Configurations:")
-    print(best_df.head(10).to_string(index=False))
-
-    # Generate plots
-    if args.plot:
-        print("\nGenerating plots...")
-        analyzer.plot_performance_comparison()
-        analyzer.plot_detector_comparison()
-
-    # Export report
-    if args.report:
-        print("\nExporting detailed report...")
+    try:
+        analyzer = BenchmarkAnalyzer(args.results_dir)
+        
+        # 1. Standard Stats
+        analyzer.summary_statistics()
+        
+        # 2. Stratified Analysis
+        analyzer.plot_faceted_boxplots()
+        analyzer.frequency_win_rates()
+        
+        # 3. Statistical Analysis
+        analyzer.plot_cd_diagram()
+        
+        # 4. Feature Discovery
+        analyzer.plot_feature_discovery()
+        
+        # 5. Sensitivity & Efficiency
+        analyzer.plot_detector_sensitivity()
+        analyzer.plot_stationarity_impact()
+        analyzer.plot_efficiency_frontier()
+        
+        # 6. Scalability & Failures
+        analyzer.plot_scalability()
+        analyzer.analyze_failures()
+        
+        # 7. Export Report
         analyzer.export_report()
-
-    print("\n✓ Analysis complete!")
-
+        analyzer.export_rankings()
+        analyzer.analyze_compactness()
+        
+        print("\n✓ Analysis Complete! All plots saved to results directory.")
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()

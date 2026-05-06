@@ -1,0 +1,57 @@
+BIGFEAT BENCHMARK ANALYSIS REPORT
+================================================================================
+
+Generated on: 2026-03-11 20:32:56
+
+1. SUMMARY STATISTICS (MASE)
+------------------------------------------------------------
+          Method     Mean   Median      Std
+        baseline 1.772555 1.310660 1.204972
+         tsfresh 3.523033 2.153507 4.875122
+          openfe 1.552061 1.189320 0.973872
+   auto_ensemble 2.881407 1.517787 4.936332
+         yes_dft 2.218638 1.615129 2.278531
+         yes_acf 2.253667 1.704514 2.204097
+yes_lomb_scargle 2.348019 1.477677 2.472153
+     no_standard 2.156601 1.567386 2.213015
+
+2. FREQUENCY-SPECIFIC WIN RATES (Auto vs Baseline)
+------------------------------------------------------------
+Frequency  N Win Rate Avg Improv
+   Hourly  4    25.0%      -9.9%
+    Daily  4    25.0%    -102.6%
+   Weekly  3    33.3%     -51.2%
+  Monthly  7    28.6%     -24.4%
+Quarterly  3    33.3%     -24.0%
+   Yearly  3    66.7%       0.2%
+
+3. FAILURE MODE ANALYSIS (Auto > Baseline + 10%)
+------------------------------------------------------------
+                  dataset freq_label  baseline_mase  auto_ensemble_mase  auto_ensemble_ts_confidence
+car_parts_without_missing    Monthly       0.911505            1.063429                          NaN
+                 cif_2016    Monthly       0.732548            1.262655                          NaN
+             covid_deaths      Daily       4.864408           25.095921                          NaN
+       electricity_hourly     Hourly       0.823504            1.188777                          NaN
+                  fred_md    Monthly       3.613215            7.104796                          NaN
+                 m4_daily      Daily       1.223900            1.561744                     0.901757
+             m4_quarterly  Quarterly       1.397420            1.890089                     0.910134
+                m4_weekly     Weekly       0.932807            2.495597                     0.985243
+        tourism_quarterly  Quarterly       2.054693            2.887080                          NaN
+
+Average Confidence in Failing Datasets: 0.93
+
+================================================================================
+End of Report
+4. COMPACTNESS ARGUMENT (Feature Efficiency)
+------------------------------------------------------------
+          Method Avg Features Avg MASE
+         tsfresh        784.2   3.5230
+          openfe          6.6   1.5521
+   auto_ensemble         17.0   2.8814
+         yes_dft         17.3   2.2186
+         yes_acf         17.0   2.2537
+yes_lomb_scargle         17.6   2.3480
+     no_standard         16.5   2.1566
+
+================================================================================
+End of Report (Updated)

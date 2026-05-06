@@ -1,0 +1,1 @@
+{"freq": "M", "target": null, "feat_static_cat": [{"name": "feat_static_cat_0", "cardinality": "107"}], "feat_static_real": [], "feat_dynamic_real": [], "feat_dynamic_cat": [], "prediction_length": 12}

@@ -230,23 +230,95 @@ class DFTWindowDetector:
         if datetime_col not in df.columns:
             raise ValueError(f"Datetime column '{datetime_col}' not found in DataFrame")
 
-        # Handle grouped data
-        if groupby_cols:
-            # Efficient "Single Series" Extraction Logic
-            try:
-                 first_row = df.iloc[0]
-                 mask = np.ones(len(df), dtype=bool)
-                 for col in groupby_cols:
-                     if col in df.columns:
-                         mask &= (df[col] == first_row[col])
-                 
-                 # Slice the dataframe to get one clean time series
-                 df = df[mask].copy()
-                 if self.verbose:
-                     print(f"DFT: Analying single time series (first group) with {len(df)} samples")
-            except Exception as e:
-                warnings.warn(f"Failed to extract single series for DFT: {e}. using full dataset.")
+        if self.verbose:
+             print(f"DEBUG DFT: Input shape: {df.shape}, Groupby: {groupby_cols}")
+             if groupby_cols is not None and len(groupby_cols) > 0:
+                  print(f"DEBUG DFT: Unique groups in {groupby_cols[0]}: {df[groupby_cols[0]].unique()}")
 
+        # Handle grouped data
+        if groupby_cols is not None and len(groupby_cols) > 0:
+            # === FIX: Multi-Series Robust Sampling ===
+            try:
+                # 1. Get a sample of unique group IDs (e.g., first 5)
+                # We assume the first column in groupby_cols is the main ID
+                main_id_col = groupby_cols[0]
+                unique_ids = df[main_id_col].unique()
+                
+                # Sample up to 5 groups to get a representative average
+                n_samples = min(5, len(unique_ids))
+                sampled_ids = unique_ids[:n_samples] 
+                
+                if self.verbose:
+                    print(f"DFT: Sampling {n_samples} series to estimate periodicity...")
+
+                # 2. Accumulate periods and confidence across samples
+                all_detected_periods = []
+                total_confidence_scores = {}
+                
+                for group_id in sampled_ids:
+                    # Filter for this specific group
+                    # (This is fast because we do it only 5 times)
+                    mask = (df[main_id_col] == group_id)
+                    single_series_df = df[mask]
+                    
+                    # Sort this small slice
+                    single_sorted = single_series_df.sort_values(datetime_col)
+                    
+                    # Run Detection on this slice
+                    for col in feature_cols:
+                        if col not in single_sorted.columns: continue
+                        
+                        series = single_sorted[col].values
+                        if len(series) < 10: continue
+
+                        processed = self._preprocess_signal(series)
+                        freqs, mags, periods = self._compute_dft(processed)
+                        
+                        # Get confidence
+                        conf = self._compute_confidence(mags)
+                        
+                        # Accumulate
+                        if col not in total_confidence_scores:
+                            total_confidence_scores[col] = []
+                        total_confidence_scores[col].append(conf)
+                        
+                        # Get Period
+                        dom_idx = np.argmax(mags)
+                        # Avoid index error if periods is empty/all zero
+                        if len(periods) > 0:
+                             period_val = periods[dom_idx]
+                             period_days = self._convert_to_days(period_val, sampling_rate)
+                             
+                             if period_days < self.min_window_days:
+                                 period_days = self.min_window_days
+                             elif period_days > self.max_window_days:
+                                 period_days = self.max_window_days
+                                 
+                             all_detected_periods.append(period_days)
+
+                # 3. Average the confidence scores
+                final_confidence_scores = {
+                    col: float(np.mean(scores)) for col, scores in total_confidence_scores.items()
+                }
+                
+                # Use the collected periods
+                if not all_detected_periods:
+                    warnings.warn("No valid periods detected in samples, using default windows")
+                    return self._get_default_windows(), {}
+                
+                # Generate multi-scale windows from ALL detected periods
+                sanitized_periods = self._apply_seasonal_bias(all_detected_periods)
+                window_sizes = self._generate_multiscale_windows(sanitized_periods)
+                
+                return window_sizes, final_confidence_scores
+
+            except Exception as e:
+                warnings.warn(f"Sampling failed: {e}. Falling back to default.")
+                return self._get_default_windows(), {}
+
+        # ---------------------------------------------------------
+        # SINGLE SERIES LOGIC (Only reached if groupby_cols is None or empty)
+        # ---------------------------------------------------------
         # Sort by datetime
         df_sorted = df.sort_values(datetime_col).reset_index(drop=True)
 
@@ -288,7 +360,7 @@ class DFTWindowDetector:
 
                 # Compute confidence
                 confidence = self._compute_confidence(magnitudes)
-                confidence_scores[col] = confidence
+                confidence_scores[col] = float(confidence)
 
                 if self.verbose:
                     print(f"Feature '{col}': detected period = {period_days:.1f} days, confidence = {confidence:.2f}")
@@ -303,7 +375,8 @@ class DFTWindowDetector:
             return self._get_default_windows(), {}
 
         # Generate multi-scale windows
-        window_sizes = self._generate_multiscale_windows(detected_periods)
+        sanitized_periods = self._apply_seasonal_bias(detected_periods)
+        window_sizes = self._generate_multiscale_windows(sanitized_periods)
 
         return window_sizes, confidence_scores
 
@@ -404,6 +477,36 @@ class DFTWindowDetector:
                         if self.min_window_days <= d <= self.max_window_days]
         return [pd.Timedelta(days=d) for d in default_days[:self.n_windows]]
 
+    COMMON_SEASONALITIES = [7, 14, 30, 90, 180, 365]
+
+    def _apply_seasonal_bias(self, detected_days: List[float]) -> List[float]:
+        """
+        Shift detected windows toward common human-centric seasonalities if close.
+        Prevents DFT from locking onto "hallucinated" windows near common periods.
+
+        Parameters:
+        -----------
+        detected_days : list of float
+            List of detected periods in days
+
+        Returns:
+        --------
+        list of float
+            Sanitized list with periods snapped to common seasonalities if applicable
+        """
+        sanitized = []
+        for d in detected_days:
+            snapped = False
+            for common in self.COMMON_SEASONALITIES:
+                # If within 10% of a common seasonality, snap to it
+                if 0.9 <= (d / common) <= 1.1:
+                    sanitized.append(common)
+                    snapped = True
+                    break
+            if not snapped:
+                sanitized.append(d)
+        return sanitized
+
     def assess_periodicity(self,
                            df: pd.DataFrame,
                            datetime_col: str,
@@ -437,8 +540,19 @@ class DFTWindowDetector:
         if not confidence_scores:
             return False, 0.0, {}
 
-        avg_confidence = np.mean(list(confidence_scores.values()))
-        is_periodic = avg_confidence >= self.confidence_threshold
+        # Calculate consensus metrics
+        # Count how many features pass the threshold individually
+        periodic_features_count = sum(1 for conf in confidence_scores.values() if float(conf) >= self.confidence_threshold)
+        periodicity_ratio = periodic_features_count / len(feature_cols) if len(feature_cols) > 0 else 0
+
+        avg_confidence = float(np.mean(list(confidence_scores.values())))
+        
+        # New Requirement: Consensus
+        # Must meet average threshold AND at least 50% of features must be periodic
+        is_periodic = bool((avg_confidence >= self.confidence_threshold) and (periodicity_ratio >= 0.5))
+
+        if self.verbose:
+            print(f"  Consensus: {periodic_features_count}/{len(feature_cols)} features are periodic ({periodicity_ratio:.1%})")
 
         if self.verbose:
             print(f"\nPeriodicity Assessment:")
@@ -485,8 +599,8 @@ class DFTWindowDetector:
                 print("Using standard windows (no valid DFT detection)")
             return self._get_default_windows(), 'standard'
 
-        avg_confidence = np.mean(list(confidence_scores.values()))
-
+        avg_confidence = float(np.mean(list(confidence_scores.values())))
+        
         if avg_confidence >= self.confidence_threshold:
             if self.verbose:
                 print(f"Using DFT-detected windows (strong periodicity, confidence={avg_confidence:.2f})")

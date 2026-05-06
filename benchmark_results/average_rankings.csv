@@ -1,0 +1,9 @@
+,Average Rank
+yes_dft_mase,3.6875
+no_standard_mase,3.8541666666666665
+baseline_mase,3.875
+openfe_mase,4.0
+yes_lomb_scargle_mase,4.458333333333333
+yes_acf_mase,4.854166666666667
+tsfresh_mase,4.944444444444445
+auto_ensemble_mase,5.229166666666667

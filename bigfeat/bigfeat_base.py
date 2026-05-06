@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import bigfeat.local_utils as local_utils
 from sklearn.metrics import roc_auc_score, mean_squared_error, r2_score, make_scorer
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit
 from sklearn.tree import _tree
 import lightgbm as lgb
 from lightgbm.sklearn import LGBMClassifier, LGBMRegressor
@@ -24,7 +24,7 @@ class BigFeat:
     def __init__(self,
                  task_type='classification',
                  enable_time_series='auto',  # 'yes'/'no'/'auto'
-                 window_detector='dft',  # 'dft'/'acf'/'lomb_scargle'
+                 window_detector='ensemble',  # 'dft'/'acf'/'lomb_scargle/'ensemble'
                  window_sizes=None,
                  lag_periods=None,
                  verbose=True,
@@ -35,10 +35,10 @@ class BigFeat:
                  window_step_options=None,
 
                  # DFT-related parameters
-                 dft_confidence_threshold=0.3,
-                 dft_min_window_days=1,
-                 dft_max_window_days=365,
-                 dft_n_windows=6,
+                 confidence_threshold=0.5,
+                 min_window_days=1,
+                 max_window_days=365,
+                 n_windows=6,
 
                  # Downsampling parameters (NEW)
                  enable_downsampling=False,
@@ -95,18 +95,18 @@ class BigFeat:
         window_step_options : list, optional
             List of possible window step options to choose from
 
-        dft_confidence_threshold : float, default=1.3
+        confidence_threshold : float, default=0.5
             Minimum confidence score to consider periodicity reliable
             Used in 'auto' mode to decide whether to enable time series
 
-        dft_min_window_days : int, default=3
-            Minimum window size in days for DFT detection
+        min_window_days : int, default=3
+            Minimum window size in days for window detection
 
-        dft_max_window_days : int, default=365
-            Maximum window size in days for DFT detection
+        max_window_days : int, default=365
+            Maximum window size in days for window detection
 
-        dft_n_windows : int, default=6
-            Number of window sizes to generate from DFT analysis
+        n_windows : int, default=6
+            Number of window sizes to generate from window analysis
 
         enable_downsampling : bool, default=False
             Enable automatic downsampling for large datasets during fit().
@@ -172,10 +172,10 @@ class BigFeat:
         self.enable_time_series = False  # Will be set during fit based on mode
 
         # DFT parameters
-        self.dft_confidence_threshold = dft_confidence_threshold
-        self.dft_min_window_days = dft_min_window_days
-        self.dft_max_window_days = dft_max_window_days
-        self.dft_n_windows = dft_n_windows
+        self.confidence_threshold = confidence_threshold
+        self.min_window_days = min_window_days
+        self.max_window_days = max_window_days
+        self.n_windows = n_windows
 
         # Downsampling parameters (NEW)
         self.enable_downsampling = enable_downsampling
@@ -184,12 +184,17 @@ class BigFeat:
 
         # Initialize the appropriate window detector
         self.window_detector_type = window_detector
+        
+        # KEY CHANGE: Ensure detector is sensitive enough (0.3) even if our strict threshold is higher (0.5)
+        # We want to detect "Moderate" periodicity (0.3-0.5) to enable restricted mode
+        detection_threshold = min(0.3, confidence_threshold)
+        
         self.window_detector = self._initialize_window_detector(
             window_detector,
-            dft_min_window_days,
-            dft_max_window_days,
-            dft_n_windows,
-            dft_confidence_threshold,
+            min_window_days,
+            max_window_days,
+            n_windows,
+            detection_threshold,
             verbose
         )
 
@@ -200,7 +205,7 @@ class BigFeat:
         if window_step_options is None:
             self.window_step_options = ['D', 'H', 'W', 'M']
         else:
-            self.window_step_options = window_step_options
+            self.window_step_options = list(window_step_options)
 
         self.time_step = time_step
 
@@ -214,7 +219,10 @@ class BigFeat:
 
         # Parameters for date/time column
         self.datetime_col = datetime_col
-        self.groupby_cols = groupby_cols or []
+        if groupby_cols is None:
+            self.groupby_cols = []
+        else:
+            self.groupby_cols = groupby_cols
         self.original_data = None
         self.feature_columns = None
 
@@ -283,9 +291,19 @@ class BigFeat:
                 confidence_threshold=confidence_threshold,
                 verbose=verbose
             )
+        elif detector_type in ['ensemble', 'standard']:
+            # Default to DFT for initial setup; auto-mode ensemble logic will override this later
+            from bigfeat.dft_window_detector import DFTWindowDetector
+            return DFTWindowDetector(
+                min_window_days=min_window_days,
+                max_window_days=max_window_days,
+                n_windows=n_windows,
+                confidence_threshold=confidence_threshold,
+                verbose=verbose
+            )
         else:
             raise ValueError(f"Unknown window_detector: {detector_type}. "
-                             f"Must be 'dft', 'acf', or 'lomb_scargle'")
+                             f"Must be 'dft', 'acf', 'lomb_scargle', 'ensemble', or 'standard'")
 
     def _setup_time_series(self, X, y=None):
         """
@@ -328,7 +346,10 @@ class BigFeat:
             if isinstance(X, pd.DataFrame):
                 feature_cols = self._identify_feature_columns(X)
             else:
-                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+                if self.feature_columns is not None and len(self.feature_columns) > 0:
+                    feature_cols = self.feature_columns
+                else:
+                    feature_cols = [f'feature_{i}' for i in range(X.shape[1])]
 
             # Detect optimal windows using DFT
             if self.user_provided_windows is None:
@@ -346,7 +367,7 @@ class BigFeat:
                         )
 
                     self.window_sizes = self.detected_windows
-                    self.detection_strategy = 'dft'
+                    self.detection_strategy = self.window_detector_type
 
                     if self.verbose:
                         avg_conf = np.mean(list(self.confidence_scores.values()))
@@ -385,6 +406,7 @@ class BigFeat:
         if mode == 'auto':
             if self.verbose:
                 print("\n=== Time Series: AUTO-DETECTION ===")
+                print(f"Assessing data stationarity and periodicity...")
 
             # Step 1: Try to find datetime column
             if self.datetime_col is None:
@@ -407,54 +429,225 @@ class BigFeat:
             if isinstance(X, pd.DataFrame):
                 feature_cols = self._identify_feature_columns(X)
             else:
-                feature_cols = self.feature_columns or [f'feature_{i}' for i in range(X.shape[1])]
+                if self.feature_columns is not None and len(self.feature_columns) > 0:
+                     feature_cols = self.feature_columns
+                else:
+                     feature_cols = [f'feature_{i}' for i in range(X.shape[1])]
 
-            # Step 3: Run DFT and assess periodicity
-            if self.verbose:
-                print(f"\nAssessing periodicity using {self.window_detector_type.upper()}...")
-
+            # Step 3: The Stationarity Gate (NEW)
+            # Calculate avg lag-1 autocorrelation BEFORE periodicity voting
             try:
-                is_periodic, avg_confidence, feature_confidences = \
-                    self.window_detector.assess_periodicity(
+                # Defensive check for DataFrame conversion (Task 11)
+                if isinstance(X, pd.DataFrame):
+                    df = self.original_data if hasattr(self, 'original_data') else X
+                elif hasattr(self, 'original_data') and isinstance(self.original_data, pd.DataFrame):
+                     df = self.original_data
+                else:
+                    df = pd.DataFrame(X)
+
+                check_cols = feature_cols[:5] # Check a wider sample
+                lag1_corrs = []
+                for col in check_cols:
+                    if col in df.columns:
+                        series = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                        corr = abs(series.autocorr(lag=1))
+                        if not np.isnan(corr): lag1_corrs.append(corr)
+
+                avg_lag1 = np.mean(lag1_corrs) if lag1_corrs else 0.0
+                self.avg_lag1 = avg_lag1 # Store as class attribute for benchmarking
+                # FIX: Enforce scalar types
+                if hasattr(avg_lag1, 'item'): avg_lag1 = avg_lag1.item()
+                is_highly_non_stationary = avg_lag1 > 0.85  # Very strong trend/random walk
+                
+                if self.verbose and is_highly_non_stationary:
+                    print(f"  ⚠ High Non-Stationarity detected (Avg Lag-1 Corr: {avg_lag1:.3f})")
+
+            except Exception as e:
+                is_highly_non_stationary = False
+                if self.verbose:
+                    print(f"Stationarity check failed: {e}")
+
+            # Step 4: Ensemble Detector Voting
+            if self.verbose:
+                print(f"Assessing periodicity using Ensemble Voting (DFT, ACF, Lomb-Scargle)...")
+
+            detectors = ['dft', 'acf', 'lomb_scargle']
+            votes = []
+            detector_results = {}
+            strongest_detector = None
+            max_confidence = -1.0
+
+            # Collect votes from all detectors
+            for det_type in detectors:
+                try:
+                    # Initialize detector
+                    # Note: We use a lower threshold (0.3) for voting eligibility to catch weaker signals
+                    # But individual votes still depend on the detector's internal logic
+                    det = self._initialize_window_detector(
+                        det_type,
+                        self.min_window_days,
+                        self.max_window_days,
+                        self.n_windows,
+                        self.confidence_threshold, # Use configured threshold
+                        verbose=False # Keep it quiet during voting
+                    )
+                    
+                    is_periodic, conf, feat_confs = det.assess_periodicity(
                         self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                         self.datetime_col,
                         feature_cols,
                         groupby_cols=self.groupby_cols
                     )
 
-                # Step 4: Decide based on confidence
-                if is_periodic:
+                    # FIX: Enforce scalar types to prevent "ambiguous truth value" error
+                    if hasattr(is_periodic, 'item'): is_periodic = is_periodic.item()
+                    if hasattr(conf, 'item'): conf = conf.item()
+
+                    is_periodic = bool(is_periodic)
+                    conf = float(conf)
+                    
+                    detector_results[det_type] = {
+                        'is_periodic': is_periodic,
+                        'confidence': conf,
+                        'feature_confidences': feat_confs,
+                        'instance': det
+                    }
+                    
+                    if is_periodic:
+                        votes.append(det_type)
+                        if self.verbose:
+                             print(f"  ✓ {det_type.upper()}: Periodic (conf={conf:.2f})")
+                    else:
+                        if self.verbose:
+                             print(f"  - {det_type.upper()}: Non-periodic (conf={conf:.2f})")
+                             
+                    if conf > max_confidence:
+                        max_confidence = conf
+                        strongest_detector = det_type
+
+                except Exception as e:
                     if self.verbose:
-                        print(
-                            f"✓ Periodicity detected (confidence={avg_confidence:.2f} > {self.dft_confidence_threshold})")
-                        print(f"  → Time series ENABLED with {self.window_detector_type.upper()}-detected windows")
-                    # Use smart window selection
-                    self.window_sizes, self.detection_strategy = \
-                        self.window_detector.smart_window_selection(
+                        print(f"  ! {det_type.upper()} failed: {e}")
+
+            # Consensus Decision
+            # We require majority (>=2) OR a very strong single vote (>0.7)
+            has_consensus = len(votes) >= 2
+            strong_signal = max_confidence > 0.7
+            
+            is_periodic_final = has_consensus or strong_signal
+            
+            if is_periodic_final:
+                # NEW: Multi-Detector Window Pooling
+                # Instead of picking ONE winner, pool windows from all valid detectors
+                all_candidate_windows = []
+                total_conf = 0
+                valid_detectors_count = 0
+                
+                # We iterate through all detectors to pool distinct windows
+                for det_type, res in detector_results.items():
+                    if res['is_periodic']:
+                        # Get windows from this specific detector
+                        det_windows, strategy_suffix = res['instance'].smart_window_selection(
                             self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
                             self.datetime_col,
                             feature_cols,
                             groupby_cols=self.groupby_cols
                         )
+                        all_candidate_windows.extend(det_windows)
+                        total_conf += res['confidence']
+                        valid_detectors_count += 1
+                        
+                        if self.verbose:
+                             print(f"  + Pooling {len(det_windows)} windows from {det_type.upper()}")
 
-                    self.detected_windows = self.window_sizes
-                    self.confidence_scores = feature_confidences
+                # Calculate consensus confidence
+                self.avg_consensus_confidence = total_conf / max(1, valid_detectors_count)
+                
+                # Process pooled windows: Remove duplicates and limit to n_windows
+                if all_candidate_windows:
+                    self.window_sizes = sorted(list(set(all_candidate_windows)))
+                    
+                    # If we have too many windows, strictly limit to n_windows to avoid explosion
+                    if len(self.window_sizes) > self.n_windows:
+                        self.window_sizes = self.window_sizes[:self.n_windows]
+                        
+                    self.detection_strategy = "pooled_ensemble"
+                    self.window_detector_type = "ensemble"
+                else:
+                    # Fallback (should be rare if is_periodic_final is True)
+                    self.window_sizes = self._get_default_windows()
+                    self.avg_consensus_confidence = 0.5
+                    self.detection_strategy = "ensemble_fallback"
+                    self.window_detector_type = "ensemble"
 
-                    # Set lag periods
-                    if self.user_provided_lags is None:
-                        self.lag_periods = [
-                            self.window_sizes[0],
-                            self.window_sizes[min(1, len(self.window_sizes) - 1)],
-                            self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
-                        ]
-                    else:
-                        self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+                # NEW: Safety Tiering with Stationarity Gate
+                # Even if periodic, if it's highly non-stationary, force Restricted Mode
+                if is_highly_non_stationary or self.avg_consensus_confidence < 0.5:
+                    if self.verbose:
+                        reason = "Non-Stationary Gate" if is_highly_non_stationary else "Moderate Conf"
+                        print(f"⚠ {reason} triggered. Restricted TS enabled (Safe Ops Only).")
+                    
+                    # 1. Restrict the specialized TS operator list
+                    self.time_series_operators = [self._safe_lag_feature, self._safe_diff_feature]
 
+                    # 2. NEW: Remove rolling/seasonal ops from the active search pool
+                    # This ensures the GA can ONLY pick Lag/Diff
+                    # Use __name__ for safe string comparison of operators
+                    restricted_names = ['_safe_rolling_mean', '_safe_rolling_std', '_safe_seasonal_decompose', '_safe_trend_feature']
+                    self.operators = [op for op in self.operators if getattr(op, '__name__', '') not in restricted_names]
+                else:
+                    if self.verbose: 
+                        print(f"✓ Strong & Stationary Signal (Conf: {self.avg_consensus_confidence:.2f}). Full TS enabled.")
+                        print(f"  → Time series ENABLED using Pooled Windows: {[str(w) for w in self.window_sizes]}")
+                        
+                    if hasattr(self, 'time_series_operators'): 
+                        delattr(self, 'time_series_operators')
+
+                # Set lag periods
+                if self.user_provided_lags is None:
+                    self.lag_periods = [
+                        self.window_sizes[0],
+                        self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                        self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                    ]
+                else:
+                    self.lag_periods = self._parse_time_periods(self.user_provided_lags)
+
+                self.enable_time_series = True
+                self._add_time_series_operators()
+                
+            else:
+                # --- Non-Periodic / Trend Check ---
+                # Check for strong trend/auto-correlation (e.g., lag-1 correlation)
+                # Using a simple check on the first feature (or average a few)
+                
+                if self.verbose: print("  → No strong periodicity consensus.")
+                
+                # Use the pre-calculated avg_lag1
+                if is_highly_non_stationary or avg_lag1 > 0.8:  # Keep 0.8 threshold for non-periodic enabled fallback
+                    if self.verbose: 
+                        print(f"  ⚠ Non-periodic but STRONG TREND detected (avg lag-1 corr={avg_lag1:.2f}).")
+                        print(f"  → Prioritizing stationarity operators (diff, pct_change).")
+                    
+                    # Override to enabled
                     self.enable_time_series = True
+                    self.detection_strategy = "trend_stationarity"
+                    
+                    # Set restricted "Stationarity" operators
+                    self.time_series_operators = [self._safe_diff_feature, self._safe_pct_change, self._safe_lag_feature]
+                    
+                    # Set minimal default windows
+                    self.window_sizes = [pd.Timedelta(days=1), pd.Timedelta(days=7)] # Minimal set
+                    self.lag_periods = [pd.Timedelta(days=1)]
+                    
                     self._add_time_series_operators()
-            except:
-                pass
-            return
+                    
+                    self._trend_mode_active = True
+                    
+                else:
+                    if self.verbose:
+                        print(f"  → No strong trend (avg lag-1={avg_lag1:.2f}). Time series features DISABLED.")
+                    self.enable_time_series = False
 
     def _initialize_operator_weights(self):
         """
@@ -463,14 +656,32 @@ class BigFeat:
         # Start with equal weights for all operators
         self.imp_operators = np.ones(len(self.operators))
 
-        if self.enable_time_series and hasattr(self, 'time_series_operators'):
+        if self.enable_time_series and hasattr(self, 'time_series_operators') and self.time_series_operators is not None:
+            # Scale the multiplier based on detection confidence
+            dynamic_multiplier = self.ts_operation_weight_multiplier
+
+            if hasattr(self, 'avg_consensus_confidence'):
+                # Boost weights if consensus is high, or penalize if signal is weak
+                # If confidence is 0.8, multiplier stays near 1.0. If 0.3, it drops to 0.5.
+                confidence_factor = np.clip(self.avg_consensus_confidence / 0.7, 0.5, 2.0)
+                dynamic_multiplier *= confidence_factor
+                if self.verbose:
+                    print(f"  Adaptive Weighting: Confidence {self.avg_consensus_confidence:.2f} -> Factor {confidence_factor:.2f}")
+
             # Apply enhanced weighting to time series operations
             for i, op in enumerate(self.operators):
                 if op in self.time_series_operators:
-                    self.imp_operators[i] *= self.ts_operation_weight_multiplier
+                    weight_mult = dynamic_multiplier
+                    
+                    # Boost stationarity operators if trend mode active
+                    if getattr(self, '_trend_mode_active', False):
+                        if op in [self._safe_diff_feature, self._safe_pct_change]:
+                             weight_mult *= 3.0
+                    
+                    self.imp_operators[i] *= weight_mult
                     if self.verbose:
                         op_name = getattr(op, '__name__', str(op))
-                        print(f"Applied {self.ts_operation_weight_multiplier}x weight to {op_name}")
+                        # print(f"Applied {weight_mult}x weight to {op_name}")
 
         # Normalize weights
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
@@ -484,9 +695,9 @@ class BigFeat:
         """
         Randomly select a window step from available options - FIXED VERSION
         """
-        if hasattr(self, 'rng') and self.window_step_options:
+        if hasattr(self, 'rng') and self.window_step_options is not None and len(self.window_step_options) > 0:
             # Only select from valid options for time-based operations
-            valid_options = [opt for opt in self.window_step_options if opt in ['D', 'H', 'W']]
+            valid_options = [opt for opt in self.window_step_options if opt in ['D', 'H', 'W', 'M', 'Q', 'Y']]
             if valid_options:
                 selected_step = self.rng.choice(valid_options)
                 if self.verbose:
@@ -647,21 +858,57 @@ class BigFeat:
 
             # Prepare series to operate on
             # If we utilize groups, we use groupby
-            if groups:
+            if groups is not None and len(groups) > 0:
                 grouped = data.groupby(groups, sort=False, group_keys=False)[feature_col]
                 
                 if operation == 'rolling_mean':
-                    result = self._vectorized_rolling(grouped, window_size, 'mean', data, groups)
+                    # OPTIMIZATION: Global rolling with masking
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).mean().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'mean', data, groups)
+                         
                 elif operation == 'rolling_std':
-                    result = self._vectorized_rolling(grouped, window_size, 'std', data, groups)
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).std().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'std', data, groups)
+                         
                 elif operation == 'rolling_min':
-                    result = self._vectorized_rolling(grouped, window_size, 'min', data, groups)
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).min().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'min', data, groups)
+                         
                 elif operation == 'rolling_max':
-                    result = self._vectorized_rolling(grouped, window_size, 'max', data, groups)
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).max().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'max', data, groups)
+                         
                 elif operation == 'rolling_median':
-                    result = self._vectorized_rolling(grouped, window_size, 'median', data, groups)
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).median().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'median', data, groups)
+                         
                 elif operation == 'rolling_sum':
-                    result = self._vectorized_rolling(grouped, window_size, 'sum', data, groups)
+                    w_size = self._resolve_lag_period(window_size, data)
+                    if isinstance(w_size, int):
+                         result = data[feature_col].rolling(window=w_size, min_periods=1).sum().fillna(0).values
+                         result = self._apply_group_mask(result, data, groups, w_size)
+                    else:
+                         result = self._vectorized_rolling(grouped, window_size, 'sum', data, groups)
                     
                 elif operation == 'lag':
                     lag_period = self._resolve_lag_period(lag_period, data)
@@ -681,15 +928,125 @@ class BigFeat:
                     lag_period = self._resolve_lag_period(lag_period, data)
                     result = grouped.diff(lag_period).fillna(0).values
                     
-                else:
-                    # Fallback for complex ops (ewm, seasonal, etc) - can be optimized later or keep using slower apply if rare
-                    # EWM on groupby is supported in recent pandas
-                    if operation == 'ewm':
-                        span = self._resolve_window_span(window_size, current_step)
-                        result = grouped.ewm(span=span, adjust=False).mean().values
+                elif operation == 'seasonal_decompose':
+                    # Apply global seasonal decomposition (ignoring blocks/groups for robustness)
+                    if hasattr(data, self.datetime_col):
+                         # Helper to use correct index
+                         temp_series = data.set_index(self.datetime_col)[feature_col]
+                         if len(temp_series) > 7:
+                             res = temp_series.groupby(temp_series.index.dayofyear).transform('mean')
+                             result = res.values
+                         else:
+                             result = np.full(len(data), temp_series.mean())
                     else:
-                        # Fallback to loop for very complex custom ops
-                        return self._apply_time_based_operation_loop(data, feature_col, operation, window_size, lag_period, current_step)
+                         result = np.zeros(len(data))
+
+                elif operation == 'trend':
+                    # Optimized Vectorized Trend (Slope of Linear Regression)
+                     w_size = self._resolve_lag_period(window_size, data)
+                     
+                     # Check if we can use vectorized numpy operations
+                     if use_vectorized_trend := True: # Enable by default
+                         try:
+                             # y = mx + c
+                             # m = (N*sum(xy) - sum(x)*sum(y)) / (N*sum(x^2) - sum(x)^2)
+                             # x is 0, 1, ..., N-1
+                             
+                             y_vals = data[feature_col].fillna(0).values
+                             N = w_size
+                             
+                             # Constants for x = 0, 1, ..., N-1
+                             x = np.arange(N)
+                             sum_x = x.sum()
+                             sum_x2 = (x ** 2).sum()
+                             denominator = N * sum_x2 - sum_x ** 2
+                             
+                             if denominator == 0:
+                                 result = np.zeros(len(data))
+                             else:
+                                 # Rolling sum of y
+                                 # using pandas rolling is reasonably fast for sum
+                                 sum_y = data[feature_col].rolling(window=N, min_periods=N).sum().fillna(0).values
+                                 
+                                 # Rolling sum of xy
+                                 # We need convolution: sum(x[i] * y[t-(N-1)+i])
+                                 # x is [0, 1, ..., N-1]
+                                 # Convolution kernel should be reversed x: [N-1, ..., 1, 0]
+                                 kernel = x[::-1]
+                                 
+                                 # Valid mode convolution returns array of length len(y) - N + 1
+                                 # We need to pad result to align
+                                 sum_xy_valid = np.convolve(y_vals, kernel, mode='valid')
+                                 
+                                 # Prepend zeros for the initial window period
+                                 padding = np.zeros(N - 1)
+                                 sum_xy = np.concatenate([padding, sum_xy_valid])
+                                 
+                                 # Calculate slope m
+                                 top = N * sum_xy - sum_x * sum_y
+                                 result = top / denominator
+                                 
+                                 # Apply proper masking later
+                         except Exception as e:
+                             if self.verbose: print(f"Vectorized trend failed: {e}, falling back.")
+                             # Use rolling apply on groups (slow fallback)
+                             def _trend_calc(x):
+                                 if len(x) < 2: return 0
+                                 return np.polyfit(np.arange(len(x)), x, 1)[0]
+                             result = grouped.rolling(window=w_size, min_periods=2).apply(_trend_calc, raw=True).fillna(0).values
+                     else:
+                        # Legacy fallback
+                        def _trend_calc(x):
+                             if len(x) < 2: return 0
+                             return np.polyfit(np.arange(len(x)), x, 1)[0]
+                        result = grouped.rolling(window=w_size, min_periods=2).apply(_trend_calc, raw=True).fillna(0).values
+
+                     # MASKING FOR TREND
+                     # Since we did global convolution, we MUST mask boundaries
+                     if groups:
+                         # Calculate group changes
+                         # Mark the first w_size-1 rows of each group as 0 (invalid trend)
+                         # We can use the generic masking logic if we refactor, but for now apply here
+                         group_mask = data[groups].ne(data[groups].shift()).any(axis=1)
+                         
+                         # Get indices where groups change
+                         change_indices = np.where(group_mask)[0]
+                         
+                         # Also the very first index is a start
+                         if 0 not in change_indices:
+                             change_indices = np.insert(change_indices, 0, 0)
+                             
+                         for idx in change_indices:
+                             end_idx = min(idx + w_size - 1, len(result))
+                             result[idx:end_idx] = 0
+
+                elif operation == 'weekday_mean':
+                     # Global vectorization
+                     if self.datetime_col in data.columns:
+                         dt_series = data[self.datetime_col]
+                         weekdays = dt_series.dt.dayofweek
+                         means = data.groupby(weekdays)[feature_col].transform('mean')
+                         result = means.values
+                     else:
+                         result = np.zeros(len(data))
+
+                elif operation == 'month_mean':
+                     # Global vectorization
+                     if self.datetime_col in data.columns:
+                         dt_series = data[self.datetime_col]
+                         months = dt_series.dt.month
+                         means = data.groupby(months)[feature_col].transform('mean')
+                         result = means.values
+                     else:
+                         result = np.zeros(len(data))
+
+                elif operation == 'ewm':
+                    span = self._resolve_window_span(window_size, current_step)
+                    result = grouped.ewm(span=span, adjust=False).mean().values
+
+                else:
+                    # Fallback for very complex custom ops
+                    return self._apply_time_based_operation_loop(data, feature_col, operation, window_size, lag_period, current_step)
 
             else:
                 # No grouping - Global Time Series
@@ -698,7 +1055,8 @@ class BigFeat:
                 if operation == 'rolling_mean':
                     result = self._vectorized_rolling_global(data, feature_col, window_size, 'mean')
                 elif operation == 'rolling_std':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'std').fillna(0)
+                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'std')
+                    result = np.nan_to_num(result)
                 elif operation == 'rolling_min':
                     result = self._vectorized_rolling_global(data, feature_col, window_size, 'min')
                 elif operation == 'rolling_max':
@@ -854,6 +1212,9 @@ class BigFeat:
             return max(1, period.days)
         elif self.time_step == 'H':
             return max(1, int(period.total_seconds() / 3600))
+        elif self.time_step == 'M': return max(1, period.days // 30)
+        elif self.time_step == 'Q': return max(1, period.days // 90)
+        elif self.time_step == 'Y': return max(1, period.days // 365)
         # ...
         return max(1, period.days)
 
@@ -866,7 +1227,7 @@ class BigFeat:
             current_step = time_step or self._select_window_step()
 
             # Check if we have groupby columns
-            if self.groupby_cols and any(col in data.columns for col in self.groupby_cols):
+            if self.groupby_cols is not None and len(self.groupby_cols) > 0 and any(col in data.columns for col in self.groupby_cols):
                 # Group data by groupby columns
                 groupby_cols = [col for col in self.groupby_cols if col in data.columns]
                 
@@ -952,38 +1313,46 @@ class BigFeat:
 
         try:
             if operation == 'rolling_mean':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).mean()
 
             elif operation == 'rolling_std':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).std().fillna(0)
 
             elif operation == 'rolling_min':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).min()
 
             elif operation == 'rolling_max':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).max()
 
             elif operation == 'rolling_median':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).median()
 
             elif operation == 'rolling_sum':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 result = series.rolling(window=window_size, min_periods=1).sum()
 
             elif operation == 'lag':
-                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                if lag_period is None:
+                    lag_period = self.rng.choice(self.lag_periods)
                 # FIX: Use shift with freq parameter for time-aware shifting
                 result = series.shift(freq=lag_period)
                 # Reindex to match original index and forward fill
                 result = result.reindex(series.index, method='ffill').fillna(0)
 
             elif operation == 'diff':
-                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                if lag_period is None:
+                    lag_period = self.rng.choice(self.lag_periods)
                 # FIX: Use shift with freq parameter
                 lagged = series.shift(freq=lag_period)
                 lagged = lagged.reindex(series.index, method='ffill').fillna(0)
@@ -991,7 +1360,8 @@ class BigFeat:
                 result = result.fillna(0)
 
             elif operation == 'pct_change':
-                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                if lag_period is None:
+                    lag_period = self.rng.choice(self.lag_periods)
                 # FIX: Use shift with freq parameter
                 lagged = series.shift(freq=lag_period)
                 lagged = lagged.reindex(series.index, method='ffill').fillna(0)
@@ -1003,7 +1373,8 @@ class BigFeat:
                 result = result.fillna(0)
 
             elif operation == 'ewm':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 # FIX: Convert timedelta to numeric span for EWM
                 # Use approximate number of periods based on time_step
                 if current_time_step == 'D':
@@ -1014,6 +1385,10 @@ class BigFeat:
                     span = window_size.days / 7
                 elif current_time_step == 'M':
                     span = window_size.days / 30
+                elif current_time_step == 'Q':
+                    span = window_size.days / 90
+                elif current_time_step == 'Y':
+                    span = window_size.days / 365
                 else:
                     span = window_size.days
 
@@ -1022,7 +1397,8 @@ class BigFeat:
                 result = series.ewm(span=span, adjust=False).mean()
 
             elif operation == 'momentum':
-                lag_period = lag_period or self.rng.choice(self.lag_periods)
+                if lag_period is None:
+                    lag_period = self.rng.choice(self.lag_periods)
                 # Momentum is just difference, use the fixed diff logic
                 lagged = series.shift(freq=lag_period)
                 lagged = lagged.reindex(series.index, method='ffill').fillna(0)
@@ -1042,7 +1418,8 @@ class BigFeat:
                     result = pd.Series(series.mean(), index=series.index)
 
             elif operation == 'trend':
-                window_size = window_size or self.rng.choice(self.window_sizes)
+                if window_size is None:
+                    window_size = self.rng.choice(self.window_sizes)
                 # Calculate trend as rolling linear regression slope
                 result = series.rolling(window=window_size, min_periods=2).apply(
                     lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0,
@@ -1070,20 +1447,62 @@ class BigFeat:
                 print(f"    Warning: Operation {operation} failed: {str(e)}")
             return pd.Series(0, index=series.index)
 
+    def _apply_group_mask(self, result, data, groups, w_size):
+        """
+        Apply mask to result array to prevent data leakage between groups in global rolling.
+        Sets the first (w_size - 1) elements of each group to 0.
+        """
+        if groups is None or len(groups) == 0:
+            return result
+            
+        try:
+            # Calculate group boundaries
+            # This identifies rows where the group key is different from the previous row
+            # Since data is sorted by group, this finds the start of each new time series
+            group_mask = data[groups].ne(data[groups].shift()).any(axis=1)
+            
+            # Get indices where groups change
+            change_indices = np.where(group_mask)[0]
+            
+            # Ensure the very first index (0) is treated as a start
+            if 0 not in change_indices:
+                change_indices = np.insert(change_indices, 0, 0)
+            
+            # Mask the beginning of each group
+            # For a rolling window of size W, the first W-1 points are invalid
+            # because they would include data from the previous group
+            mask_len = int(w_size) - 1
+            if mask_len <= 0:
+                return result
+                
+            # Efficient masking
+            # If many groups, we can optimize further, but this loop is O(n_groups)
+            if mask_len > 0:
+                 # Create an array of indices to mask for all groups at once
+                 offsets = np.arange(mask_len)
+                 mask_indices = (change_indices[:, None] + offsets).flatten()
+                 # Filter indices within bounds
+                 mask_indices = mask_indices[mask_indices < len(result)]
+                 result[mask_indices] = 0
+                
+            return result
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Group masking failed: {e}")
+            return result
+
     # Time Series Utility Methods
     def _clean_feature(self, feature_data):
-        """Clean feature data to ensure stability"""
         try:
             feature_data = np.asarray(feature_data, dtype=float)
-            # Replace inf with large finite values
-            feature_data = np.where(np.isinf(feature_data), np.sign(feature_data) * 1e8, feature_data)
-            # Replace nan with zeros
-            feature_data = np.where(np.isnan(feature_data), 0, feature_data)
-            # Clip extreme values
-            feature_data = np.clip(feature_data, -1e8, 1e8)
-            return feature_data
+            # Use a safe maximum for float32 (approx 1e38)
+            # We use a more conservative 1e30 to prevent overflow in subsequent multiplications
+            safe_max = 1e30 
+            feature_data = np.nan_to_num(feature_data, nan=0.0, posinf=safe_max, neginf=-safe_max)
+            return np.clip(feature_data, -safe_max, safe_max)
         except Exception:
-            return np.zeros_like(feature_data, dtype=float)
+            return np.zeros_like(feature_data)
 
     def _validate_feature(self, feature_data):
         """Validate features for stability and usefulness"""
@@ -1091,17 +1510,17 @@ class BigFeat:
             if len(feature_data) == 0:
                 return False
             feature_data = np.asarray(feature_data, dtype=float)
-            if not np.isfinite(feature_data).all():
+            if not bool(np.isfinite(feature_data).all()):
                 return False
-            if np.std(feature_data) < 1e-10:
+            if float(np.std(feature_data)) < 1e-10:
                 return False
-            if np.max(np.abs(feature_data)) > 1e8:
+            if float(np.max(np.abs(feature_data))) > 1e8:
                 return False
             return True
         except Exception:
             return False
 
-    # Enhanced Safe Time Series Operations that use time-based operations
+    # Safe Time Series Operations that use time-based operations
     def _safe_rolling_mean(self, feature_data, window_size=None, time_step=None, context_data=None, **kwargs):
         """Safe rolling mean calculation using time-based operations"""
         # Task 5: Use explicit context_data if provided, else fallback to global state
@@ -1109,12 +1528,13 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_mean', window_size=window_size, time_step=time_step)
         else:
             # Fallback to original implementation
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     # Estimate integer window if timedelta passed to fallback
                     window_size = max(1, window_size.days)
@@ -1135,11 +1555,12 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_std', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1155,11 +1576,12 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_min', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1175,11 +1597,12 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_max', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1195,11 +1618,12 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_median', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1215,11 +1639,12 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_sum', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([3, 5, 7, 10, 14, 21, 30])
+                if window_size is None:
+                    window_size = self.rng.choice([3, 5, 7, 10, 14, 21, 30])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1235,11 +1660,13 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'lag', lag_period=lag_period)
         else:
             try:
-                lag_periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                lag_periods = lag_period
+                if lag_periods is None:
+                    lag_periods = self.rng.choice([1, 2, 3, 5, 7, 10])
                 if isinstance(lag_periods, pd.Timedelta):
                     lag_periods = max(1, lag_periods.days)
                 lag_periods = min(lag_periods, len(feature_data) - 1)
@@ -1255,11 +1682,13 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'diff', lag_period=lag_period)
         else:
             try:
-                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period
+                if periods is None:
+                    periods = self.rng.choice([1, 2, 3, 5, 7, 10])
                 if isinstance(periods, pd.Timedelta):
                     periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
@@ -1275,11 +1704,13 @@ class BigFeat:
         
         if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
             feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
             return self._apply_time_based_operation(data_source, feature_col, 'pct_change', lag_period=lag_period)
         else:
             try:
-                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period
+                if periods is None:
+                    periods = self.rng.choice([1, 2, 3, 5, 7, 10])
                 if isinstance(periods, pd.Timedelta):
                     periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
@@ -1301,7 +1732,7 @@ class BigFeat:
         else:
             try:
                 # Approximate alpha from window_size if passed, otherwise random
-                if window_size:
+                if window_size is not None:
                     if isinstance(window_size, pd.Timedelta):
                         span = max(1, window_size.days)
                     else:
@@ -1325,7 +1756,9 @@ class BigFeat:
             return self._apply_time_based_operation(data_source, feature_col, 'momentum', lag_period=lag_period)
         else:
             try:
-                periods = lag_period or self.rng.choice([1, 2, 3, 5, 7, 10])
+                periods = lag_period
+                if periods is None:
+                    periods = self.rng.choice([1, 2, 3, 5, 7, 10])
                 if isinstance(periods, pd.Timedelta):
                     periods = max(1, periods.days)
                 periods = min(periods, len(feature_data) - 1)
@@ -1369,7 +1802,8 @@ class BigFeat:
             return self._apply_time_based_operation(data_source, feature_col, 'trend', window_size=window_size, time_step=time_step)
         else:
             try:
-                window_size = window_size or self.rng.choice([7, 14, 30, 60])
+                if window_size is None:
+                    window_size = self.rng.choice([7, 14, 30, 60])
                 if isinstance(window_size, pd.Timedelta):
                     window_size = max(1, window_size.days)
                 window_size = min(window_size, len(feature_data))
@@ -1417,7 +1851,7 @@ class BigFeat:
                 if self.verbose: print(f"Error in month_mean: {e}")
                 return feature_data
 
-    def _calculate_block_params(self, total_limit, max_window_size=None):
+    def _calculate_block_params(self, total_limit, max_window_size=None, padding=0):
         """
         Calculate optimal block sampling parameters (detector-agnostic).
 
@@ -1427,11 +1861,13 @@ class BigFeat:
             Maximum total samples allowed (from memory calculation)
         max_window_size : int, optional
             Maximum window size in days. If None, queries active detector.
+        padding : int, default=0
+            Padding/warm-up size to include in memory calculations.
 
         Returns:
         --------
         tuple of (int, int)
-            (n_blocks, block_size)
+            (n_blocks, block_size) - block_size is the CORE size (excluding padding)
         """
         # 1. Dynamic parameter resolution
         if max_window_size is None:
@@ -1439,8 +1875,8 @@ class BigFeat:
                 max_window_size = self.window_detector.max_window_days
                 if self.verbose:
                     print(f"  Querying {self.window_detector_type} detector: max_window={max_window_size} days")
-            elif hasattr(self, 'dft_max_window_days'):
-                max_window_size = self.dft_max_window_days
+            elif hasattr(self, 'max_window_days'):
+                max_window_size = self.max_window_days
                 if self.verbose:
                     print(f"  Using configured max_window: {max_window_size} days")
             else:
@@ -1449,41 +1885,57 @@ class BigFeat:
                     print(f"  Using default max_window: {max_window_size} days")
 
         # 2. Safety Calculation: Block must be 3x window size
-        min_block_size = max_window_size * 3
+        min_core_size = max_window_size * 3
+        # Total cost per block includes padding
+        min_total_size = min_core_size + padding
 
         if self.verbose:
-            print(f"  Minimum safe block size: {min_block_size} rows (3x window)")
+            print(f"  Minimum safe block size: {min_core_size} + {padding} padding = {min_total_size} rows")
 
         # 3. Emergency handling
-        if total_limit < min_block_size:
-            min_block_size = int(max_window_size * 1.1)
+        if total_limit < min_total_size:
+            # If we can't fit even one safe block + padding, try to squeeze core size
+            # We must prioritize having at least ONE block with some history
+            # Reduced core size:
+            min_core_size = int(max_window_size * 1.1)
+            min_total_size = min_core_size + padding
+            
             if self.verbose:
-                print(f"  ⚠️  Memory tight! Reducing to: {min_block_size}")
+                print(f"  ⚠️  Memory tight! Reducing core to: {min_core_size}")
 
-            if total_limit < min_block_size:
-                min_block_size = max(1, total_limit)
+            if total_limit < min_total_size:
+                # Critical: Can't even fit 1.1x window + padding?
+                # Just take whatever fits, even if it breaks windows
+                min_core_size = max(1, total_limit - padding)
+                if min_core_size < 1: min_core_size = 1 # Edge case
+                min_total_size = min_core_size + padding
+                
                 if self.verbose:
-                    print(f"  ⚠️  CRITICAL: Using minimum: {min_block_size}")
+                    print(f"  ⚠️  CRITICAL: Using minimum core: {min_core_size}")
 
         # 4. Diversity Optimization
         ideal_n_blocks = 10
-        tentative_block_size = total_limit // ideal_n_blocks
-
-        if tentative_block_size >= min_block_size:
+        # Calculate max rows available per block if we split equally
+        max_rows_per_block = total_limit // ideal_n_blocks
+        
+        if max_rows_per_block >= min_total_size:
             n_blocks = ideal_n_blocks
-            block_size = tentative_block_size
+            # Block size returned is CORE size
+            block_size = max_rows_per_block - padding
             if self.verbose:
-                print(f"  ✓ Optimal: {n_blocks} blocks × {block_size} rows")
+                print(f"  ✓ Optimal: {n_blocks} blocks × ({block_size} core + {padding} pad) rows")
         else:
-            n_blocks = max(1, total_limit // min_block_size)
-            block_size = min_block_size
+            # Maximizing number of valid blocks
+            n_blocks = max(1, total_limit // min_total_size)
+            block_size = min_core_size
             if self.verbose:
-                print(f"  ⚠️  Constrained: {n_blocks} blocks × {block_size} rows")
+                print(f"  ⚠️  Constrained: {n_blocks} blocks × ({block_size} core + {padding} pad) rows")
 
         return n_blocks, block_size
 
     def fit(self, X, y, gen_size=5, random_state=0, iterations=5, estimator='avg',
-            feat_imps=True, split_feats=None, check_corr=True, selection='stability', combine_res=True):
+            feat_imps=True, split_feats=None, check_corr=True, selection='stability', combine_res=True,
+            n_features=None, max_depth=None):
         """
         Generate Features using test set - Enhanced for DFT-based time series detection
 
@@ -1532,8 +1984,119 @@ class BigFeat:
         else:
             self.original_data = X
 
-        # === CRITICAL: Setup time series based on mode ===
+        # --- Automatic Target Scaling (Log-Transform) ---
+        # For strictly positive and highly skewed regression targets
+        self._target_log_transformed = False
+        if self.task_type == 'regression':
+            try:
+                # Convert y to series for easy checks
+                y_series = pd.Series(np.ravel(y))
+                if bool((y_series > 0).all()):
+                     skewness = y_series.skew()
+                     if skewness > 2.0:  # Highly skewed
+                         if self.verbose: 
+                             print(f"  → High skewness detected (skew={skewness:.2f}). Applying log-transform to target.")
+                         
+                         y = np.log1p(y)
+                         self._target_log_transformed = True
+            except Exception as e:
+                if self.verbose: 
+                    print(f"Warning: Target scaling check failed: {e}")
+
+        # === Setup time series based on mode ===
         ts_enabled = self._setup_time_series(X, y)
+
+        # NEW: Detection Cross-Validation (Pre-Flight Check)
+        if ts_enabled and self.enable_time_series:
+            try:
+                # Perform a quick check to see if derived TS features actually effective
+                # This protects against "hallucinated" seasonality in noisy data
+                if self.verbose: print("  Running Pre-flight Detection Cross-Validation...")
+                
+                # 1. Prepare small split (last 20% or max 1000 rows to save time)
+                # Validation on END of series is better for TS
+                n_cv = min(len(X), 1000)
+                split_idx = int(n_cv * 0.8)
+                
+                # Use the sorted internal data if available, else X
+                # (Note: _setup_time_series might set self._current_data but _prepare_time_series_data is called LATER in fit)
+                # So we use X directly, assuming we can get a column.
+                
+                if isinstance(X, pd.DataFrame) and self.datetime_col in X.columns:
+                     # Sort temporarily for this check
+                     df_cv = X.sort_values(self.datetime_col).tail(n_cv)
+                     target_cv = y[-n_cv:] if len(y) >= n_cv else y
+                     
+                     # Split train/test
+                     train_cv = df_cv.iloc[:split_idx]
+                     test_cv = df_cv.iloc[split_idx:]
+                     y_train_cv = target_cv[:split_idx]
+                     y_test_cv = target_cv[split_idx:]
+                     
+                     if len(train_cv) > 20:
+                         # 2. Baseline Model (Raw Features only)
+                         # Clean raw features
+                         raw_cols = [c for c in self.feature_columns if c in df_cv.columns]
+                         X_base_train = train_cv[raw_cols].fillna(0).values
+                         X_base_test = test_cv[raw_cols].fillna(0).values
+                         
+                         model_base = LinearRegression()
+                         model_base.fit(X_base_train, y_train_cv)
+                         preds_base = model_base.predict(X_base_test)
+                         mae_base = np.mean(np.abs(y_test_cv - preds_base))
+                         
+                         # 3. TS Enhanced Model (Raw + Top Pooled Features)
+                         # Generate 2-3 key features: Lag-1, Rolling Mean (best window), Rolling Std
+                         X_ts_train = X_base_train.copy()
+                         X_ts_test = X_base_test.copy()
+                         
+                         # Best window
+                         best_win = self.window_sizes[0] if self.window_sizes else 3
+                         # Feature to use (use first one)
+                         target_feat = raw_cols[0] if raw_cols else None
+                         
+                         if target_feat:
+                             # Helper to gen feature
+                             def quick_roll(df, win, op):
+                                 if op == 'mean': return df[target_feat].rolling(window=win, min_periods=1).mean().fillna(0).values.reshape(-1, 1)
+                                 if op == 'std': return df[target_feat].rolling(window=win, min_periods=1).std().fillna(0).values.reshape(-1, 1)
+                                 return np.zeros((len(df), 1))
+                                 
+                             # Train feats
+                             f1_tr = quick_roll(train_cv, best_win, 'mean')
+                             f2_tr = quick_roll(train_cv, best_win, 'std')
+                             X_ts_train = np.hstack([X_ts_train, f1_tr, f2_tr])
+                             
+                             # Test feats (CAREFUL: rolling needs context, but for quick check we just roll on test or concat?
+                             # Concat is better but slow. Rolling on test is leaky or loses first few rows.
+                             # We'll acceptable small error for speed: just roll on test.)
+                             f1_te = quick_roll(test_cv, best_win, 'mean')
+                             f2_te = quick_roll(test_cv, best_win, 'std')
+                             X_ts_test = np.hstack([X_ts_test, f1_te, f2_te])
+                             
+                             model_ts = LinearRegression()
+                             model_ts.fit(X_ts_train, y_train_cv)
+                             preds_ts = model_ts.predict(X_ts_test)
+                             mae_ts = np.mean(np.abs(y_test_cv - preds_ts))
+                             
+                             # 4. Compare
+                             if mae_base > 0:
+                                 improvement = (mae_base - mae_ts) / mae_base
+                             else:
+                                 improvement = 0
+                                 
+                             if self.verbose:
+                                 print(f"  CV Result: Base MAE={mae_base:.4f}, TS MAE={mae_ts:.4f} (Imp: {improvement*100:.1f}%)")
+                                 
+                             # 5. Penalize if no improvement
+                             if improvement < 0.05: # Less than 5% improvement
+                                 if self.verbose: print("  ⚠ Weak TS improvement. Reducing operator weights.")
+                                 self.ts_operation_weight_multiplier *= 0.5
+                                 
+                                 # Re-initialize weights to apply reduction
+                                 self._initialize_operator_weights()
+            except Exception as e:
+                if self.verbose: print(f"  CV Check skipped: {e}")
 
         # Identify and extract feature columns
         if isinstance(X, pd.DataFrame):
@@ -1559,11 +2122,11 @@ class BigFeat:
             # Sort X and y by datetime to ensure alignment (Task 4/6)
             self._current_data, y_sorted = self._prepare_time_series_data(X, y)
             
-            # CRITICAL: Update y to match sorted X order
+            # Update y to match sorted X order
             if y_sorted is not None:
                 y = y_sorted
             
-            # CRITICAL: Update X_features to match sorted order
+            # Update X_features to match sorted order
             X_features = self._current_data[self.feature_columns].values
             X_features = np.array(X_features, dtype=float)
             
@@ -1604,7 +2167,20 @@ class BigFeat:
                     print(f"Dataset size: {len(X_features):,} rows → {limit:,} rows")
 
                 # === Calculate block parameters ===
-                n_blocks, block_size = self._calculate_block_params(limit)
+                # Determine padding size (max window needed for rolling ops)
+                padding_size = 0
+                if self.enable_time_series:
+                    if hasattr(self, 'window_detector') and hasattr(self.window_detector, 'max_window_days'):
+                         padding_size = self.window_detector.max_window_days
+                    elif hasattr(self, 'max_window_days'):
+                         padding_size = self.max_window_days
+                    else:
+                         padding_size = 365
+                    
+                    if self.verbose:
+                        print(f"  Padding size for rolling history: {padding_size}")
+
+                n_blocks, block_size = self._calculate_block_params(limit, padding=padding_size)
 
                 if self.verbose:
                     print(f"\n📦 Block Sampling Strategy:")
@@ -1635,8 +2211,11 @@ class BigFeat:
                     block_ids_list = []
                     for block_idx, start in enumerate(sorted(start_indices)):
                         # Ensure we don't go out of bounds
+                        # Task Fix: Add padding for "warm-up" history
+                        actual_start = max(0, start - padding_size)
                         end = min(start + block_size, len(X_features))
-                        indices = range(start, end)
+                        
+                        indices = range(actual_start, end)
                         sample_indices.extend(indices)
                         block_ids_list.extend([block_idx] * len(indices))
 
@@ -1674,10 +2253,13 @@ class BigFeat:
                 self.n_rows_fit = len(X_features_sampled)
                 self._was_downsampled = True
                 self._downsampling_method = 'contiguous_blocks'
-                # CRITICAL: Store original full data for final transform
+                # Store original full data for final transform
                 self._X_features_full = X_features
-                self._original_data_full = self.original_data.copy() if isinstance(self.original_data,
-                                                                                   pd.DataFrame) else self.original_data
+                # Defensive copy for original data
+                if isinstance(self.original_data, pd.DataFrame):
+                    self._original_data_full = self.original_data.copy()
+                else:
+                    self._original_data_full = self.original_data
 
                 if self.verbose:
                     print(f"\n{'=' * 60}")
@@ -1709,7 +2291,10 @@ class BigFeat:
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
         self.gen_steps = []
-        self.n_feats = X_for_fit.shape[1]
+        if n_features is not None:
+             self.n_feats = n_features
+        else:
+             self.n_feats = X_for_fit.shape[1]
         self.n_rows = X_for_fit.shape[0]
         self.ig_vector = np.ones(self.n_feats) / self.n_feats
         self.comb_mat = np.ones((self.n_feats, self.n_feats))
@@ -1728,12 +2313,15 @@ class BigFeat:
         ids_comb = np.zeros(self.n_feats * iterations, dtype=object)
         ops_comb = np.zeros(self.n_feats * iterations, dtype=object)
         self.feat_depths = np.zeros(gen_feats.shape[1])
-        self.depth_range = np.arange(3) + 1
+        if max_depth is not None:
+            self.depth_range = np.arange(max_depth) + 1
+        else:
+            self.depth_range = np.arange(3) + 1
         self.depth_weights = 1 / (2 ** self.depth_range)
         self.depth_weights /= self.depth_weights.sum()
 
         # Scaling
-        self.scaler = MinMaxScaler()
+        self.scaler = RobustScaler()
         self.scaler.fit(X_for_fit)
         X_scaled = self.scaler.transform(X_for_fit)
 
@@ -1759,6 +2347,8 @@ class BigFeat:
                 self.ig_vector = self.split_vec
 
         # === Feature Generation Iterations ===
+        previous_imps = None  # Track importances for Elitism
+
         if self.verbose:
             print(f"\nStarting {iterations} feature generation iterations...")
 
@@ -1776,21 +2366,123 @@ class BigFeat:
             self.tracking_ids = []
             gen_feats = np.zeros((self.n_rows, self.n_feats * gen_size))
             self.feat_depths = np.zeros(gen_feats.shape[1])
+            start_gen_idx = 0
+
+            # --- Elitism Injection ---
+            if iteration > 0 and previous_imps is not None:
+                # Always preserve the top 20% of features from the previous iteration
+                n_elite = max(1, self.n_feats // 5)
+                # Use argsort on previous_imps (which corresponds to the successful n_feats from last round)
+                # Note: previous_imps stores importances of the n_feats SELECTED in the last round.
+                # However, we need to fetch the actual feature DATA.
+                # The 'iters_comb' stores ALL history. The last round's successful feats are in iters_comb corresponding to (iteration-1).
+                
+                # Check if we have valid history in iters_comb
+                # The features selected in (iteration-1) are stored in columns:
+                # [(iteration-1)*self.n_feats : iteration*self.n_feats]
+                # BUT wait. 'iters_comb' stores the SELECTED features from each iteration.
+                # So we can just take the top N from the previous batch in iters_comb.
+                
+                # Identify indices of top performing features relative to the previous batch
+                elite_local_indices = np.argsort(previous_imps)[-n_elite:]
+                
+                # Calculate the global column indices in iters_comb for these elite features
+                prev_batch_start = (iteration - 1) * self.n_feats
+                elite_global_indices = prev_batch_start + elite_local_indices
+                
+                if self.verbose: 
+                    print(f"  ★ Elitism: Injecting top {n_elite} features from previous generation")
+
+                # Inject into current generation pool
+                # We place them at the BEGINNING of gen_feats
+                gen_feats[:, :n_elite] = iters_comb[:, elite_global_indices]
+                
+                # Also carry over their metadata
+                # Note: tracking_ops is a list, tracking_ids is a list/array
+                # We need to append them to the tracking lists.
+                # Since tracking_ops/ids are re-initialized to empty lists [] above, we just populate them.
+                
+                # Fetch elite metadata from history arrays
+                elite_ops = ops_comb[elite_global_indices]
+                elite_ids = ids_comb[elite_global_indices]
+                elite_depths = depths_comb[elite_global_indices]
+                
+                self.tracking_ops.extend(elite_ops)
+                self.tracking_ids.extend(elite_ids)
+                
+                # Update depths array
+                self.feat_depths[:n_elite] = elite_depths
+                
+                # Update start index for random generation so we don't overwrite elite feats
+                start_gen_idx = n_elite
+
+            # Pre-calculate correlations for Feature-Target Filter
+            y_flat = np.ravel(y_for_fit)
+            y_flat = np.nan_to_num(y_flat)
+            y_std = np.std(y_flat)
+            
+            input_feat_corrs = np.zeros(X_scaled.shape[1])
+            if y_std > 1e-9:
+                for ft_idx in range(X_scaled.shape[1]):
+                    ft_data = X_scaled[:, ft_idx]
+                    ft_std = np.std(ft_data)
+                    if ft_std > 1e-9:
+                        try:
+                            c_val = abs(np.corrcoef(ft_data, y_flat)[0, 1])
+                            if not np.isnan(c_val):
+                                input_feat_corrs[ft_idx] = c_val
+                        except: pass
 
             # Generate features
-            for i in range(gen_feats.shape[1]):
-                dpth = self.rng.choice(self.depth_range, p=self.depth_weights)
-                ops = []
-                ids = []
-                gen_feats[:, i] = self.feat_with_depth(X_scaled, dpth, ops, ids, context_data=getattr(self, '_current_data', None))
+            for i in range(start_gen_idx, gen_feats.shape[1]):
+                # Retry loop to force GA to find signals stronger than parents
+                max_retries = 3
+                best_attempt = None
+                best_corr_diff = -np.inf
+                
+                for attempt in range(max_retries):
+                    dpth = self.rng.choice(self.depth_range, p=self.depth_weights)
+                    ops = []
+                    ids = []
+                    
+                    # Generate candidate
+                    feat_val = self.feat_with_depth(X_scaled, dpth, ops, ids, context_data=getattr(self, '_current_data', None))
+                    feat_val = self._clean_feature(feat_val)
+                    
+                    # --- Feature-Target Correlation Filter ---
+                    gen_corr = 0.0
+                    feat_std = np.std(feat_val)
+                    
+                    if y_std > 1e-9 and feat_std > 1e-9:
+                        try:
+                            c_new = abs(np.corrcoef(feat_val, y_flat)[0, 1])
+                            if not np.isnan(c_new):
+                                gen_corr = c_new
+                        except: pass
+                    
+                    # Compare with parents
+                    max_parent_corr = 0.0
+                    if ids is not None and len(ids) > 0:
+                        # Use unique IDs to avoid redundant lookups
+                        max_parent_corr = max([input_feat_corrs[pid] for pid in ids])
+                    
+                    diff = gen_corr - max_parent_corr
+                    
+                    if best_attempt is None or diff > best_corr_diff:
+                        best_attempt = (feat_val, dpth, ops, ids)
+                        best_corr_diff = diff
+                    
+                    # If we beat or match the parents, stop retrying
+                    if diff >= -1e-9:
+                        break
+                
+                # Use best attempt
+                final_feat, final_dpth, final_ops, final_ids = best_attempt
 
-                # Clean generated feature if time series is enabled
-                if self.enable_time_series:
-                    gen_feats[:, i] = self._clean_feature(gen_feats[:, i])
-
-                self.feat_depths[i] = dpth
-                self.tracking_ops.append(ops)
-                self.tracking_ids.append(ids)
+                gen_feats[:, i] = final_feat
+                self.feat_depths[i] = final_dpth
+                self.tracking_ops.append(final_ops)
+                self.tracking_ids.append(final_ids)
 
             self.tracking_ids = np.array(self.tracking_ids + [[]], dtype='object')[:-1]
             self.tracking_ops = np.array(self.tracking_ops + [[]], dtype='object')[:-1]
@@ -1807,6 +2499,9 @@ class BigFeat:
             self.tracking_ops = self.tracking_ops[feat_args]
             self.feat_depths = self.feat_depths[feat_args]
 
+            # Save importances for next iteration's elitism
+            previous_imps = imps[feat_args]
+
             # Store iteration results
             depths_comb[iteration * self.n_feats:(iteration + 1) * self.n_feats] = self.feat_depths
             ids_comb[iteration * self.n_feats:(iteration + 1) * self.n_feats] = self.tracking_ids
@@ -1814,16 +2509,55 @@ class BigFeat:
             iters_comb[:, iteration * self.n_feats:(iteration + 1) * self.n_feats] = gen_feats
 
             # Update operator importance
-            for i, op in enumerate(self.operators):
-                for feat in self.tracking_ops:
-                    for feat_op in feat:
-                        if op == feat_op[0]:
-                            weight_increment = 1
-                            if hasattr(self, 'time_series_operators') and op in self.time_series_operators:
-                                weight_increment *= self.ts_operation_weight_multiplier
-                            self.imp_operators[i] += weight_increment
+            # Update operator importance with Diversity Control and Smoothing
+            # 1. Decay existing weights (Smoothing) - ensure history matters but fades
+            decay_factor = 0.8
+            self.imp_operators *= decay_factor
 
-            self.operator_weights = self.imp_operators / self.imp_operators.sum()
+            # 2. Count current iteration usage efficiently
+            op_counts = np.zeros(len(self.operators))
+            total_ops_used = 0
+            
+            # Create a quick lookup for operator indices
+            op_to_idx = {op: i for i, op in enumerate(self.operators)}
+            
+            for feat_ops in self.tracking_ops:
+                for op_info in feat_ops:
+                    # op_info is tuple: (op_function, depth, params)
+                    op_func = op_info[0]
+                    if op_func in op_to_idx:
+                        idx = op_to_idx[op_func]
+                        op_counts[idx] += 1
+                        total_ops_used += 1
+
+            # 3. Apply updates with Diversity Penalty
+            for i, count in enumerate(op_counts):
+                if count > 0:
+                    increment = count
+                    
+                    # Diversity Penalty: If one operator dominates (> 50% of usage)
+                    usage_share = count / total_ops_used if total_ops_used > 0 else 0
+                    if usage_share > 0.5:
+                        increment *= 0.1  # Heavy penalty for monotony to force exploration
+                        if self.verbose and iteration == 0: 
+                             print(f"  Note: Diversity penalty applied to dominant operator '{self.operators[i].__name__}'")
+
+                    # Time Series Multiplier (Reward for TS operators if configured)
+                    if hasattr(self, 'time_series_operators') and self.operators[i] in self.time_series_operators:
+                        increment *= self.ts_operation_weight_multiplier
+                    
+                    self.imp_operators[i] += increment
+
+            # 4. Normalize with Floor (Prevent Starvation)
+            # Calculate raw probabilities
+            raw_weights = self.imp_operators / self.imp_operators.sum()
+            
+            # Apply dynamic floor (e.g., 5% or 1/(2*N) to ensure nothing hits true zero)
+            min_weight = min(0.05, 1.0 / (2 * len(self.operators)))
+            weights_floored = np.maximum(raw_weights, min_weight)
+            
+            # Renormalize to ensure sum is 1.0
+            self.operator_weights = weights_floored / weights_floored.sum()
 
         if self.verbose and self.enable_time_series:
             ts_weight_sum = sum(
@@ -1922,7 +2656,8 @@ class BigFeat:
                 gen_feats = self.transform(self._original_data_full)
             else:
                 # For numpy arrays, need to reconstruct DataFrame with feature columns
-                if self.feature_columns:
+                if self.feature_columns is not None and len(self.feature_columns) > 0:
+
                     full_df = pd.DataFrame(self._X_features_full, columns=self.feature_columns)
                     # Add datetime/groupby columns if available
                     if isinstance(self.original_data, pd.DataFrame):
@@ -1948,10 +2683,10 @@ class BigFeat:
             if hasattr(self, '_full_current_data_backup'):
                 delattr(self, '_full_current_data_backup')
         
-        # CRITICAL FIX: Restore original order for fit output (if not downsampled)
+        # Restore original order for fit output (if not downsampled)
         # If downsampled, transform() loop above already handled this.
         # If NOT downsampled, gen_feats is still in time-sorted order from the fit loop.
-        if not self._was_downsampled and self.enable_time_series and hasattr(self, '_current_data') and hasattr(self._current_data, 'columns') and '_original_index' in self._current_data.columns:
+        if not self._was_downsampled and self.enable_time_series and hasattr(self, '_current_data') and self._current_data is not None and hasattr(self._current_data, 'columns') and '_original_index' in self._current_data.columns:
             # Create DataFrame with the restored index to align back to input X
             res_df = pd.DataFrame(gen_feats)
             res_df.index = self._current_data['_original_index']
@@ -2008,7 +2743,7 @@ class BigFeat:
 
         # Handle DataFrame input with datetime column
         if isinstance(X, pd.DataFrame):
-            if self.feature_columns:
+            if self.feature_columns is not None and len(self.feature_columns) > 0:
                 # Use the stored feature columns from fit
                 available_feature_cols = [col for col in self.feature_columns if col in X.columns]
                 if len(available_feature_cols) != len(self.feature_columns):
@@ -2047,9 +2782,8 @@ class BigFeat:
             op_ls = self.tracking_ops[i].copy()
             id_ls = self.tracking_ids[i].copy()
             gen_feats[:, i] = self.feat_with_depth_gen(X_scaled, dpth, op_ls, id_ls, context_data=context_data)
-            # Clean generated feature if time series is enabled
-            if self.enable_time_series:
-                gen_feats[:, i] = self._clean_feature(gen_feats[:, i])
+            # Clean generated feature unconditionally (prevent overflow/NaNs)
+            gen_feats[:, i] = self._clean_feature(gen_feats[:, i])
                 
         # Combine generated features with original scaled features
         gen_feats = np.hstack((gen_feats, X_scaled))
@@ -2122,7 +2856,7 @@ class BigFeat:
             else:
                 result = op(feat_1, feat_2)
             
-            return self._clean_feature(result) if self.enable_time_series else result
+            return self._clean_feature(result)
 
         elif op in self.unary_operators:
             feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls, context_data)
@@ -2134,7 +2868,7 @@ class BigFeat:
             else:
                 result = op(feat_1)
                 
-            return self._clean_feature(result) if self.enable_time_series else result
+            return self._clean_feature(result)
 
     def feat_with_depth_gen(self, X, depth, op_ls, feat_ls, context_data=None):
         """ Reproduce generated features with new data - Enhanced to handle datetime-aware time series operators """
@@ -2149,7 +2883,11 @@ class BigFeat:
         op_info = op_ls.pop()
         op = op_info[0]
         # Helper to extract params safely (handle legacy format without params)
-        params = op_info[2] if len(op_info) > 2 else {}
+        # Robustly check for parameters without triggering array-truth errors
+        if isinstance(op_info, (list, tuple)) and len(op_info) > 2:
+            params = op_info[2]
+        else:
+            params = {}
 
         if op in self.binary_operators:
             feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls, context_data)
@@ -2160,7 +2898,7 @@ class BigFeat:
             else:
                 result = op(feat_2, feat_1)
                 
-            return self._clean_feature(result) if self.enable_time_series else result
+            return self._clean_feature(result)
 
         elif op in self.unary_operators:
             feat_1 = self.feat_with_depth_gen(X, depth, op_ls, feat_ls, context_data)
@@ -2170,7 +2908,7 @@ class BigFeat:
             else:
                 result = op(feat_1)
                 
-            return self._clean_feature(result) if self.enable_time_series else result
+            return self._clean_feature(result)
 
     # Original methods - completely unchanged from previous version
     def select_estimator(self, X, y, estimators_names=None):
@@ -2204,33 +2942,66 @@ class BigFeat:
             else:  # regression
                 scorer = make_scorer(r2_score)
 
-            models_score[estimator] = cross_val_score(model, X, y, cv=3, scoring=scorer).mean()
+            # Define CV strategy
+            if self.enable_time_series:
+                 cv_strategy = TimeSeriesSplit(n_splits=5) # Increased for consistency
+            else:
+                 cv_strategy = 5
+
+            models_score[estimator] = cross_val_score(model, X, y, cv=cv_strategy, scoring=scorer).mean()
 
         best_estimator = max(models_score, key=models_score.get)
         best_model = estimators_dic[best_estimator]
         best_model.fit(X, y)
         return best_model
 
-    def get_feature_importances(self, X, y, estimator, random_state, sample_count=1, sample_size=3, n_jobs=1):
+    def get_feature_importances(self, X, y, estimator, random_state, sample_count=1, sample_size=5, n_jobs=1):
         """Return feature importances by specified method - Original method"""
         importance_sum = np.zeros(X.shape[1])
         total_estimators = []
 
-        for sampled in range(sample_count):
-            if self.enable_time_series:
-                 # Task 6: Time-based splitting (contiguous block)
-                 n_sample = self.n_rows // sample_size
-                 if n_sample >= self.n_rows:
-                     sampled_ind = np.arange(self.n_rows)
-                 else:
-                     # Pick a random contiguous block to preserve temporal structure
-                     start_idx = np.random.randint(0, self.n_rows - n_sample)
-                     sampled_ind = np.arange(start_idx, start_idx + n_sample)
+        if self.enable_time_series:
+            # Use TimeSeriesSplit to evaluate importance across time
+            tscv = TimeSeriesSplit(n_splits=sample_size)
+            # Inspect splits to handle potential small dataset issues gracefully if needed,
+            # though sklearn handles basic splitting.
+            # We convert to list to iterate easily or handle max splits.
+            try:
+                folds = list(tscv.split(X))
+            except ValueError:
+                # Fallback if too few samples for splits
+                folds = [] 
+        else:
+            folds = [None] * sample_count 
+            
+        # Determine number of iterations based on mode
+        # If time series, we iterate through folds. If not, we iterate sample_count times.
+        if self.enable_time_series:
+            iterations = len(folds)
+            if iterations == 0 and sample_count > 0:
+                 # Fallback to single pass on full data if splitting failed (e.g. tiny data)
+                 # Or just fallback to random? Let's stick to full data to respect time order.
+                 iterations = 1
+                 folds = [(np.arange(len(X)-1), np.arange(len(X)-1, len(X)))] # Dummy split
+        else:
+            iterations = sample_count
+
+        for i in range(iterations):
+            if self.enable_time_series and len(folds) > 0:
+                train_index, test_index = folds[i]
+                sampled_ind = test_index
             else:
                  sampled_ind = np.random.choice(np.arange(self.n_rows), size=self.n_rows // sample_size, replace=False)
 
             sampled_X = X[sampled_ind]
-            sampled_y = np.take(y, sampled_ind)
+            
+            # Safe indexing for y
+            if hasattr(y, 'iloc'):
+                sampled_y = y.iloc[sampled_ind]
+            elif hasattr(y, 'values'):
+                 sampled_y = y.values[sampled_ind]
+            else:
+                sampled_y = np.take(y, sampled_ind)
 
             if estimator in ["rf", "rf_reg"]:
                 if self.task_type == 'classification' or estimator == "rf":
@@ -2310,14 +3081,24 @@ class BigFeat:
         return np.average(imps, axis=0, weights=weights)
 
     def check_correlations(self, feats):
-        """ Check correlations among the selected features - Original method """
-        cor_thresh = 0.8
-        corr_matrix = pd.DataFrame(feats).corr().abs()
-        mask = np.tril(np.ones_like(corr_matrix, dtype=bool))
-        tri_df = corr_matrix.mask(mask)
-        to_drop = [c for c in tri_df.columns if any(tri_df[c] > cor_thresh)]
-        feats = pd.DataFrame(feats).drop(to_drop, axis=1)
-        return feats.values, to_drop
+        """ Check correlations among the selected features - Robust method """
+        cor_thresh = 0.85 if self.enable_time_series else 0.7
+        
+        # Safe conversion to DataFrame
+        df_feats = pd.DataFrame(feats)
+        corr_matrix = df_feats.corr().abs()
+        
+        # Get upper triangle of correlation matrix
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        
+        # Identify columns to drop
+        # Explicitly check each column to ensure scalar boolean evaluation
+        to_drop = [column for column in upper.columns if bool(np.any(upper[column] > cor_thresh))]
+        
+        # Drop columns
+        df_reduced = df_feats.drop(columns=to_drop)
+        
+        return df_reduced.values, to_drop
 
     def get_paths(self, clf, feature_names):
         """ Returns every path in the decision tree - Original method """
@@ -2380,13 +3161,13 @@ class BigFeat:
         ]
 
         # Filter by constraints if DFT parameters are set
-        if hasattr(self, 'dft_min_window_days') and hasattr(self, 'dft_max_window_days'):
+        if hasattr(self, 'min_window_days') and hasattr(self, 'max_window_days'):
             filtered = [w for w in default_windows
-                        if self.dft_min_window_days <= w.days <= self.dft_max_window_days]
+                        if self.min_window_days <= w.days <= self.max_window_days]
 
             # Return top n_windows if that parameter exists
-            if hasattr(self, 'dft_n_windows') and len(filtered) > self.dft_n_windows:
-                return filtered[:self.dft_n_windows]
+            if hasattr(self, 'n_windows') and len(filtered) > self.n_windows:
+                return filtered[:self.n_windows]
             return filtered
 
         return default_windows
@@ -2456,7 +3237,7 @@ class BigFeat:
         exclude_cols = []
         if self.datetime_col and self.datetime_col in X.columns:
             exclude_cols.append(self.datetime_col)
-        if hasattr(self, 'groupby_cols') and self.groupby_cols:
+        if hasattr(self, 'groupby_cols') and self.groupby_cols is not None and len(self.groupby_cols) > 0:
             exclude_cols.extend([col for col in self.groupby_cols if col in X.columns])
 
         # Get all potential feature columns
@@ -2497,8 +3278,14 @@ class BigFeat:
                             continue
                             
                         # Try casting to float (Task 8 fix)
-                        float(val)
-                        is_numeric = True
+                        # Secure against array-like objects being in the cell
+                        if hasattr(val, '__len__') and not isinstance(val, str):
+                             # excessive recursion protection
+                             pass
+                        else:
+                             float(val)
+                             is_numeric = True
+                             
                 except (ValueError, TypeError):
                     pass
             
@@ -2560,7 +3347,7 @@ class BigFeat:
                 if summary['avg_confidence']:
                     print(f"\nAverage Confidence: {summary['avg_confidence']:.2f}")
                     # Use generic confidence threshold if available, else dft specific
-                    threshold = getattr(self, 'confidence_threshold', getattr(self, 'dft_confidence_threshold', 0))
+                    threshold = getattr(self, 'confidence_threshold', getattr(self, 'confidence_threshold', 0))
                     print(f"Threshold: {threshold}")
         else:
             print(f"Reason: {summary['detection_strategy']}")

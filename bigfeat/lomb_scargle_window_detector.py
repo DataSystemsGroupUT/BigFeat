@@ -220,7 +220,7 @@ class LombScargleWindowDetector:
             raise ValueError(f"Datetime column '{datetime_col}' not found in DataFrame")
 
         # Handle grouped data
-        if groupby_cols:
+        if groupby_cols is not None and len(groupby_cols) > 0:
             try:
                  first_row = df.iloc[0]
                  mask = np.ones(len(df), dtype=bool)
@@ -301,7 +301,7 @@ class LombScargleWindowDetector:
                 valid_periods = [p for p in peak_periods_days
                                  if self.min_window_days <= p <= self.max_window_days]
 
-                if valid_periods:
+                if len(valid_periods) > 0:
                     # Take top 3 periods per feature
                     detected_periods.extend(valid_periods[:3])
 
@@ -331,7 +331,7 @@ class LombScargleWindowDetector:
 
         if self.verbose:
             print(f"\nFinal window sizes: {[w.days for w in window_sizes]} days")
-            avg_conf = np.mean(list(confidence_scores.values())) if confidence_scores else 0.0
+            avg_conf = float(np.mean(list(confidence_scores.values()))) if confidence_scores else 0.0
             print(f"Average confidence: {avg_conf:.3f}")
 
         return window_sizes, confidence_scores
@@ -412,8 +412,8 @@ class LombScargleWindowDetector:
         if not confidence_scores:
             return False, 0.0, {}
 
-        avg_confidence = np.mean(list(confidence_scores.values()))
-        is_periodic = avg_confidence >= self.confidence_threshold
+        avg_confidence = float(np.mean(list(confidence_scores.values())))
+        is_periodic = bool(avg_confidence >= self.confidence_threshold)
 
         if self.verbose:
             print(f"\nLomb-Scargle Periodicity Assessment:")
@@ -439,7 +439,7 @@ class LombScargleWindowDetector:
         if not confidence_scores:
             return self._get_default_windows(), 'standard'
 
-        avg_confidence = np.mean(list(confidence_scores.values()))
+        avg_confidence = float(np.mean(list(confidence_scores.values())))
 
         if avg_confidence >= self.confidence_threshold:
             strategy = 'lomb_scargle'
