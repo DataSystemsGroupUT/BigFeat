@@ -2991,7 +2991,10 @@ class BigFeat:
                 train_index, test_index = folds[i]
                 sampled_ind = test_index
             else:
-                 sampled_ind = np.random.choice(np.arange(self.n_rows), size=self.n_rows // sample_size, replace=False)
+                 # Draw from self.rng (seeded by fit's random_state) rather than the
+                 # global numpy RNG, so that fit() is reproducible from random_state
+                 # alone without the caller also having to seed numpy globally.
+                 sampled_ind = self.rng.choice(np.arange(self.n_rows), size=self.n_rows // sample_size, replace=False)
 
             sampled_X = X[sampled_ind]
             
