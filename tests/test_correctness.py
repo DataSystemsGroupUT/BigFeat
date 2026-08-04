@@ -226,3 +226,92 @@ def test_get_paths_first_path_survives_when_it_equals_the_last():
             "test fixture no longer reproduces the wrap-around condition"
         )
         assert paths == raw, "current implementation must keep every path here"
+
+
+# ---------------------------------------------------------------------------
+# Refitting must not inherit state from a previous fit
+# ---------------------------------------------------------------------------
+
+def test_refit_matches_a_fresh_estimator(periodic_data, clf_data):
+    """fit() twice on one object must equal fitting two fresh objects.
+
+    self.operators had time-series operators appended in place, guarded by a
+    _ts_operators_added flag that was never reset, so a second fit inherited
+    the first one's operator pool -- including on data with a completely
+    different periodicity verdict.
+    """
+    X_ts, y_ts = periodic_data
+
+    reused = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                        datetime_col="date", verbose=False)
+    reused.fit(X_ts, y_ts, **FIT_KWARGS)
+    second_on_reused = reused.fit(X_ts, y_ts, **FIT_KWARGS)
+
+    fresh = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                       datetime_col="date", verbose=False)
+    on_fresh = fresh.fit(X_ts, y_ts, **FIT_KWARGS)
+
+    assert second_on_reused.shape == on_fresh.shape, (
+        f"refit produced {second_on_reused.shape} but a fresh estimator "
+        f"produced {on_fresh.shape}; state leaked across fits"
+    )
+    np.testing.assert_allclose(
+        np.asarray(second_on_reused, dtype=float),
+        np.asarray(on_fresh, dtype=float), rtol=1e-9, atol=1e-9,
+        err_msg="refit did not match a fresh estimator",
+    )
+
+
+def test_operator_pool_does_not_grow_across_fits(periodic_data):
+    """The operator list must be rebuilt, not appended to, on each fit."""
+    X, y = periodic_data
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", verbose=False)
+
+    bf.fit(X, y, **FIT_KWARGS)
+    first_count = len(bf.operators)
+    bf.fit(X, y, **FIT_KWARGS)
+    second_count = len(bf.operators)
+
+    assert first_count == second_count, (
+        f"operator pool grew from {first_count} to {second_count} across "
+        f"fits; operators are being appended in place"
+    )
+    assert len(bf.operators) == len(set(bf.operators)), \
+        "operator pool contains duplicates"
+
+
+def test_preflight_penalty_does_not_compound_across_fits(periodic_data):
+    """The pre-flight penalty is per-fit and must not overwrite user config."""
+    X, y = periodic_data
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date",
+                    ts_operation_weight_multiplier=2.0, verbose=False)
+
+    for _ in range(3):
+        bf.fit(X, y, **FIT_KWARGS)
+        assert bf.ts_operation_weight_multiplier == 2.0, (
+            "the constructor argument was overwritten by the pre-flight "
+            "penalty; repeated fits would compound the reduction"
+        )
+
+
+def test_preflight_check_actually_runs(periodic_data, capsys):
+    """The pre-flight check must execute, not die in its own except block.
+
+    It read self.feature_columns before that attribute was assigned, so it
+    raised TypeError on every fit and the bare `except` swallowed it. The
+    check never ran at all.
+    """
+    X, y = periodic_data
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", verbose=True)
+    bf.fit(X, y, **FIT_KWARGS)
+
+    out = capsys.readouterr().out
+    assert "Pre-flight Detection Cross-Validation" in out
+    assert "CV Check skipped" not in out, (
+        f"pre-flight check still aborts into its exception handler:\n"
+        f"{[l for l in out.splitlines() if 'CV Check skipped' in l]}"
+    )
+    assert "CV Result:" in out, "pre-flight check did not reach a verdict"

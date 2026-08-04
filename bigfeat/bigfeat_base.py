@@ -658,7 +658,7 @@ class BigFeat:
 
         if self.enable_time_series and hasattr(self, 'time_series_operators') and self.time_series_operators is not None:
             # Scale the multiplier based on detection confidence
-            dynamic_multiplier = self.ts_operation_weight_multiplier
+            dynamic_multiplier = self.effective_ts_weight_multiplier
 
             if hasattr(self, 'avg_consensus_confidence'):
                 # Boost weights if consensus is high, or penalize if signal is weak
@@ -1909,6 +1909,46 @@ class BigFeat:
                 if self.verbose: print(f"Error in month_mean: {e}")
                 return feature_data
 
+    def _reset_fit_state(self):
+        """Clear state carried over from any previous fit() on this object.
+
+        Several attributes were accumulated in place and never cleared, so
+        calling fit() twice on one estimator did not give the same result as
+        fitting a fresh one:
+
+        * self.operators / self.unary_operators had the time-series operators
+          appended (and, in restricted mode, entries filtered out) directly on
+          the instance lists, guarded by a _ts_operators_added flag that was
+          never reset. A second fit on data with a different periodicity
+          verdict kept the first fit's operator pool.
+        * _effective_ts_weight_multiplier persisted the pre-flight penalty.
+        * time_series_operators / _trend_mode_active persisted the previous
+          run's restricted-mode decision.
+
+        Rebuild the operator pool from the base definitions each time.
+        """
+        self.operators = [np.multiply, np.add, np.subtract, np.abs, np.square]
+        self.unary_operators = [np.abs, np.square, local_utils.original_feat]
+
+        for attr in ('_ts_operators_added', 'time_series_operators',
+                     '_trend_mode_active', '_effective_ts_weight_multiplier',
+                     'avg_consensus_confidence', 'avg_lag1'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+    @property
+    def effective_ts_weight_multiplier(self):
+        """The TS operator weight multiplier in force for the current fit.
+
+        Normally this is the constructor argument. The pre-flight check may
+        halve it for a single fit when time-series features show no measurable
+        benefit; that per-fit penalty is stored separately so it cannot
+        compound across successive fit() calls or silently overwrite what the
+        caller configured.
+        """
+        return getattr(self, '_effective_ts_weight_multiplier',
+                       self.ts_operation_weight_multiplier)
+
     @staticmethod
     def _normalize_to_distribution(weights):
         """Scale a non-negative weight vector so it sums to 1.
@@ -2054,6 +2094,8 @@ class BigFeat:
             Generated and selected features
         """
         
+        self._reset_fit_state()
+
         if self.verbose:
             print("\n" + "=" * 60)
             print("BigFeat Feature Generation Started")
@@ -2087,7 +2129,24 @@ class BigFeat:
         # === Setup time series based on mode ===
         ts_enabled = self._setup_time_series(X, y)
 
-        # NEW: Detection Cross-Validation (Pre-Flight Check)
+        # Identify feature columns before the pre-flight check below, which
+        # needs them. They used to be assigned only after that block, so
+        # self.feature_columns was still None when the check ran, the check
+        # raised TypeError immediately, and the bare `except` swallowed it --
+        # meaning this "protection against hallucinated seasonality" never
+        # actually executed on any fit.
+        if isinstance(X, pd.DataFrame):
+            self.feature_columns = self._identify_feature_columns(X)
+            if len(self.feature_columns) == 0:
+                raise ValueError("No numeric feature columns found after filtering!")
+        elif hasattr(X, 'columns'):
+            self.feature_columns = list(X.columns)
+        else:
+            self.feature_columns = [
+                f'feature_{i}' for i in range(np.asarray(X).shape[1])
+            ]
+
+        # Detection Cross-Validation (Pre-Flight Check)
         if ts_enabled and self.enable_time_series:
             try:
                 # Perform a quick check to see if derived TS features actually effective
@@ -2137,23 +2196,42 @@ class BigFeat:
                          target_feat = raw_cols[0] if raw_cols else None
                          
                          if target_feat:
-                             # Helper to gen feature
-                             def quick_roll(df, win, op):
-                                 if op == 'mean': return df[target_feat].rolling(window=win, min_periods=1).mean().fillna(0).values.reshape(-1, 1)
-                                 if op == 'std': return df[target_feat].rolling(window=win, min_periods=1).std().fillna(0).values.reshape(-1, 1)
-                                 return np.zeros((len(df), 1))
-                                 
-                             # Train feats
-                             f1_tr = quick_roll(train_cv, best_win, 'mean')
-                             f2_tr = quick_roll(train_cv, best_win, 'std')
-                             X_ts_train = np.hstack([X_ts_train, f1_tr, f2_tr])
-                             
-                             # Test feats (CAREFUL: rolling needs context, but for quick check we just roll on test or concat?
-                             # Concat is better but slow. Rolling on test is leaky or loses first few rows.
-                             # We'll acceptable small error for speed: just roll on test.)
-                             f1_te = quick_roll(test_cv, best_win, 'mean')
-                             f2_te = quick_roll(test_cv, best_win, 'std')
-                             X_ts_test = np.hstack([X_ts_test, f1_te, f2_te])
+                             # Compute the rolling features ONCE over the full
+                             # ordered series, then slice train/test out of the
+                             # result.
+                             #
+                             # Previously each side was rolled independently.
+                             # That restarted the window at the start of the
+                             # test slice, so test rows saw no real history and
+                             # their features did not match what transform()
+                             # would produce -- the code carried a comment
+                             # acknowledging this ("Rolling on test is leaky")
+                             # and did it anyway. Rolling over the concatenated
+                             # series is both correct and causal: pandas'
+                             # rolling only ever looks backwards, so test rows
+                             # draw on training history without any test row
+                             # influencing an earlier one.
+                             if isinstance(best_win, pd.Timedelta):
+                                 win_rows = max(1, int(best_win.days))
+                             else:
+                                 win_rows = max(1, int(best_win))
+
+                             full_series = df_cv[target_feat]
+                             roll_mean = full_series.rolling(
+                                 window=win_rows, min_periods=1).mean().fillna(0).values
+                             roll_std = full_series.rolling(
+                                 window=win_rows, min_periods=1).std().fillna(0).values
+
+                             X_ts_train = np.hstack([
+                                 X_ts_train,
+                                 roll_mean[:split_idx].reshape(-1, 1),
+                                 roll_std[:split_idx].reshape(-1, 1),
+                             ])
+                             X_ts_test = np.hstack([
+                                 X_ts_test,
+                                 roll_mean[split_idx:].reshape(-1, 1),
+                                 roll_std[split_idx:].reshape(-1, 1),
+                             ])
                              
                              model_ts = LinearRegression()
                              model_ts.fit(X_ts_train, y_train_cv)
@@ -2172,8 +2250,17 @@ class BigFeat:
                              # 5. Penalize if no improvement
                              if improvement < 0.05: # Less than 5% improvement
                                  if self.verbose: print("  ⚠ Weak TS improvement. Reducing operator weights.")
-                                 self.ts_operation_weight_multiplier *= 0.5
-                                 
+                                 # Halve for THIS fit only. This used to
+                                 # overwrite the constructor argument, so the
+                                 # penalty compounded across successive fit()
+                                 # calls on the same estimator: two fits on
+                                 # weak data left the multiplier at 0.25 of
+                                 # what the caller asked for, with no way to
+                                 # recover it short of rebuilding the object.
+                                 self._effective_ts_weight_multiplier = (
+                                     self.ts_operation_weight_multiplier * 0.5
+                                 )
+
                                  # Re-initialize weights to apply reduction
                                  self._initialize_operator_weights()
             except Exception as e:
@@ -2625,7 +2712,7 @@ class BigFeat:
 
                     # Time Series Multiplier (Reward for TS operators if configured)
                     if hasattr(self, 'time_series_operators') and self.operators[i] in self.time_series_operators:
-                        increment *= self.ts_operation_weight_multiplier
+                        increment *= self.effective_ts_weight_multiplier
                     
                     self.imp_operators[i] += increment
 
