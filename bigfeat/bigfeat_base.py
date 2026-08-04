@@ -1060,23 +1060,38 @@ class BigFeat:
                              end_idx = min(idx + w_size - 1, len(result))
                              result[idx:end_idx] = 0
 
-                elif operation == 'weekday_mean':
-                     # Global vectorization
+                elif operation in ('weekday_mean', 'month_mean'):
+                     # Expanding mean within each calendar group, over PRIOR
+                     # observations only.
+                     #
+                     # This used to be a plain groupby(...).transform('mean'),
+                     # which averages the whole column within each weekday /
+                     # month. That is look-ahead leakage: a row's feature value
+                     # was computed partly from rows dated after it, including
+                     # -- at transform() time -- rows from the future relative
+                     # to the point being predicted. It inflated apparent
+                     # performance for exactly the seasonal signals these
+                     # operators are meant to capture.
+                     #
+                     # shift(1) drops the current row so a value never depends
+                     # on itself; expanding().mean() then averages only the
+                     # earlier rows in the same calendar group. Early rows have
+                     # no prior observation in their group and are left at 0.
                      if self.datetime_col in data.columns:
                          dt_series = data[self.datetime_col]
-                         weekdays = dt_series.dt.dayofweek
-                         means = data.groupby(weekdays)[feature_col].transform('mean')
-                         result = means.values
-                     else:
-                         result = np.zeros(len(data))
+                         if operation == 'weekday_mean':
+                             calendar_key = dt_series.dt.dayofweek
+                         else:
+                             calendar_key = dt_series.dt.month
 
-                elif operation == 'month_mean':
-                     # Global vectorization
-                     if self.datetime_col in data.columns:
-                         dt_series = data[self.datetime_col]
-                         months = dt_series.dt.month
-                         means = data.groupby(months)[feature_col].transform('mean')
-                         result = means.values
+                         # Respect entity/block boundaries when present, so a
+                         # series never borrows history from another series.
+                         group_key = [calendar_key] if not groups else list(groups) + [calendar_key]
+
+                         means = data.groupby(group_key, sort=False)[feature_col].transform(
+                             lambda s: s.shift(1).expanding().mean()
+                         )
+                         result = means.fillna(0).values
                      else:
                          result = np.zeros(len(data))
 
@@ -1466,15 +1481,18 @@ class BigFeat:
                     raw=True
                 ).fillna(0)
 
-            elif operation == 'weekday_mean':
-                # Calculate mean for each weekday
-                weekday_means = series.groupby(series.index.dayofweek).transform('mean')
-                result = weekday_means
-
-            elif operation == 'month_mean':
-                # Calculate mean for each month
-                month_means = series.groupby(series.index.month).transform('mean')
-                result = month_means
+            elif operation in ('weekday_mean', 'month_mean'):
+                # Expanding mean within the calendar group over PRIOR rows only.
+                # A plain transform('mean') here averaged the whole group,
+                # including rows dated after the row being computed -- see the
+                # matching fix in _apply_time_based_operation.
+                if operation == 'weekday_mean':
+                    calendar_key = series.index.dayofweek
+                else:
+                    calendar_key = series.index.month
+                result = series.groupby(calendar_key).transform(
+                    lambda s: s.shift(1).expanding().mean()
+                ).fillna(0)
 
             else:
                 result = pd.Series(0, index=series.index)
@@ -1890,6 +1908,32 @@ class BigFeat:
             except Exception as e:
                 if self.verbose: print(f"Error in month_mean: {e}")
                 return feature_data
+
+    @staticmethod
+    def _normalize_to_distribution(weights):
+        """Scale a non-negative weight vector so it sums to 1.
+
+        Used for the sampling distributions that drive feature selection
+        (ig_vector, split_vec). These were previously normalized with a bare
+        `v /= v.sum()`, which produces NaN whenever the weights sum to zero --
+        and they legitimately do for degenerate input. A frame of constant or
+        all-zero columns gives every feature zero importance, so fit() died
+        with "ValueError: probabilities contain NaN" from rng.choice, rather
+        than reporting anything useful about the data.
+
+        Falls back to a uniform distribution when there is no signal to
+        preserve, which lets generation proceed instead of crashing.
+        """
+        weights = np.asarray(weights, dtype=float)
+        # Guard against NaN/inf arriving from an upstream estimator.
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        # Negative importances are not meaningful as sampling probabilities.
+        weights = np.clip(weights, 0.0, None)
+
+        total = weights.sum()
+        if total <= 0 or not np.isfinite(total):
+            return np.ones_like(weights) / max(len(weights), 1)
+        return weights / total
 
     def _calculate_block_params(self, total_limit, max_window_size=None, padding=0):
         """
@@ -2370,16 +2414,16 @@ class BigFeat:
             self.ig_vector, estimators = self.get_feature_importances(
                 X_scaled, y_for_fit, estimator, random_state
             )
-            self.ig_vector /= self.ig_vector.sum()
+            self.ig_vector = self._normalize_to_distribution(self.ig_vector)
 
             for tree in estimators:
                 paths = self.get_paths(tree, np.arange(X_scaled.shape[1]))
                 self.get_split_feats(paths, self.split_vec)
-            self.split_vec /= self.split_vec.sum()
+            self.split_vec = self._normalize_to_distribution(self.split_vec)
 
             if split_feats == "comb":
                 self.ig_vector = np.multiply(self.ig_vector, self.split_vec)
-                self.ig_vector /= self.ig_vector.sum()
+                self.ig_vector = self._normalize_to_distribution(self.ig_vector)
             elif split_feats == "splits":
                 self.ig_vector = self.split_vec
 
@@ -3171,10 +3215,16 @@ class BigFeat:
 
         recurse(0, 1, path_list)
 
+        # Collapse runs of identical consecutive paths.
+        #
+        # The index used to be `path_list[i - 1]`, which at i == 0 wraps to
+        # path_list[-1] -- the LAST path. So whenever a tree's first and last
+        # root-to-leaf paths happened to match, the first path was silently
+        # dropped and never counted in the split-frequency vector.
         new_list = []
-        for i in range(len(path_list)):
-            if path_list[i] != path_list[i - 1]:
-                new_list.append(path_list[i])
+        for i, current in enumerate(path_list):
+            if i == 0 or current != path_list[i - 1]:
+                new_list.append(current)
         return new_list
 
     def get_combos(self, paths, comb_mat):
