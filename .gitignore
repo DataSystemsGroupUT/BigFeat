@@ -2,8 +2,11 @@ BigFeat/data/*
 BigFeat/logs/*
 BigFeat/res/*
 dist/
+build/
 bigfeat.egg-info/
 __pycache__/
+.pytest_cache/
+.claude/
 venv
 .venv
 .idea
@@ -11,3 +14,12 @@ venv
 *debug*
 *reproduce*
 *verify*
+
+# ...but the pytest suite is always tracked, even if a filename matches above.
+!tests/
+!tests/**
+
+# Large intermediate data artifacts (e.g. OpenFE scratch files) must not be
+# committed; openfe_tmp_data.feather was tracked at ~20MB before this rule.
+*.feather
+

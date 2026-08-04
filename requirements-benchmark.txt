@@ -1,0 +1,13 @@
+# Dependencies for the benchmarking suite (testing/Benchmarking/) only.
+# The BigFeat library itself does not import any of these.
+-r requirements.txt
+
+gluonts==0.16.2
+matplotlib==3.10.5
+openfe==0.0.12
+pyarrow==23.0.0
+seaborn==0.13.2
+statsmodels==0.14.6
+stumpy==1.13.0
+tsfresh==0.21.1
+yfinance==0.2.65

@@ -11,10 +11,16 @@ setup(
     url = "https://github.com/DataSystemsGroupUT/BigFeat",
     packages=['bigfeat'],
     long_description=("Automated feature engineering library"),
+    python_requires='>=3.8',
     install_requires=[
         'pandas',
         'numpy',
         'scikit-learn',
         'lightgbm',
+        'scipy',
+        'psutil',
     ],
+    extras_require={
+        'test': ['pytest'],
+    },
 )

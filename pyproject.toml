@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Project metadata lives in setup.py for now; this file exists to declare the
+# build backend and to configure pytest.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+filterwarnings = [
+    # BigFeat emits many benign numpy/pandas warnings during feature generation;
+    # surface them without failing the suite.
+    "default",
+]
