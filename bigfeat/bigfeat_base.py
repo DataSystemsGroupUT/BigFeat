@@ -767,10 +767,25 @@ class BigFeat:
         """
         if not self.enable_time_series or self.datetime_col is None:
             return X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
-            
-        # Optimization: Return immediately if already sorted (Task 7)
-        if hasattr(self, '_is_sorted') and self._is_sorted:
-             return X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+
+        # NOTE: there was previously an "already sorted" short-circuit here,
+        # keyed on a self._is_sorted flag. It was unsound. The flag was set the
+        # first time this ran (during fit) and only ever reset at the top of
+        # fit(), so every subsequent transform() returned X untouched --
+        # skipping the datetime sort, the dtype coercion, and the
+        # _original_index bookkeeping that the rest of transform() depends on.
+        #
+        # The result was that a row's time-series features were computed from
+        # its position in the caller's array rather than from its timestamp,
+        # and the fAnova branch at the end of transform() became unreachable.
+        # Because the flag stayed set for *every* call, the corruption was
+        # consistent, so it could not be detected by comparing two transform()
+        # calls to each other -- only by checking invariance to input row
+        # order. See tests/test_invariants.py.
+        #
+        # Sortedness is a property of the data passed in, not of the estimator,
+        # so it cannot be cached on self. The check below is O(n) and cheap
+        # relative to the feature generation that follows.
 
         # Convert to DataFrame if needed
         if isinstance(X, pd.DataFrame):
@@ -782,14 +797,40 @@ class BigFeat:
             else:
                 df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
 
-        # Add datetime column from stored original data if available
-        if self.original_data is not None and self.datetime_col in self.original_data.columns:
-            df[self.datetime_col] = self.original_data[self.datetime_col].values[:len(df)]
+        # Fill in the datetime / groupby columns from the stored training data
+        # ONLY where the caller's own frame does not already provide them.
+        #
+        # This used to overwrite unconditionally, grafting *training*
+        # timestamps positionally onto whatever rows were passed in. When the
+        # caller's rows were not in training order that paired each row with
+        # someone else's timestamp, so the sort below produced a plausible but
+        # wrong ordering, and _original_index no longer identified which input
+        # row an output row came from.
+        #
+        # Positional alignment against self.original_data is only meaningful
+        # when the incoming frame really is the training frame, in the training
+        # row order -- which we cannot assume in transform().
+        if self.original_data is not None:
+            if (self.datetime_col not in df.columns
+                    and self.datetime_col in self.original_data.columns):
+                if len(df) != len(self.original_data):
+                    raise ValueError(
+                        f"Cannot infer '{self.datetime_col}' for transform input: "
+                        f"got {len(df)} rows but the fitted data had "
+                        f"{len(self.original_data)}. Pass the datetime column "
+                        f"in X so rows can be aligned by timestamp."
+                    )
+                df[self.datetime_col] = self.original_data[self.datetime_col].values
 
-            # Add groupby columns if specified
             for col in self.groupby_cols:
-                if col in self.original_data.columns:
-                    df[col] = self.original_data[col].values[:len(df)]
+                if col not in df.columns and col in self.original_data.columns:
+                    if len(df) != len(self.original_data):
+                        raise ValueError(
+                            f"Cannot infer groupby column '{col}' for transform "
+                            f"input: got {len(df)} rows but the fitted data had "
+                            f"{len(self.original_data)}. Pass '{col}' in X."
+                        )
+                    df[col] = self.original_data[col].values
 
         # Ensure datetime column is datetime type
         if self.datetime_col in df.columns:
@@ -833,8 +874,7 @@ class BigFeat:
             
             # Remove temp index and reset, BUT KEEP _original_index
             df = df.drop(columns=['_sort_idx_temp']).reset_index(drop=True)
-            self._is_sorted = True # Flag to avoid redundant sorting
-            
+
         if y is not None:
             return df, y
         return df
@@ -1970,9 +2010,6 @@ class BigFeat:
             Generated and selected features
         """
         
-        # Reset sorting state for new fit call
-        self._is_sorted = False
-
         if self.verbose:
             print("\n" + "=" * 60)
             print("BigFeat Feature Generation Started")
@@ -2788,23 +2825,32 @@ class BigFeat:
         # Combine generated features with original scaled features
         gen_feats = np.hstack((gen_feats, X_scaled))
 
-        # CRITICAL FIX: Restore original order if time series sorting was applied
+        # Apply the fitted feature selector BEFORE restoring row order.
+        #
+        # This used to sit after the time-series early-return below, which made
+        # it unreachable whenever time series was enabled: fit() would return k
+        # selected columns while transform() returned the full unselected
+        # width, so train and test matrices silently disagreed in shape.
+        #
+        # Selecting columns and restoring row order are independent, so doing
+        # the column selection first is safe and lets both paths share it.
+        if self.selection == 'fAnova':
+            gen_feats = self.fAnova_best.transform(gen_feats)
+
+        # Restore original row order if time series sorting was applied
         if self.enable_time_series and context_data is not None and '_original_index' in context_data.columns:
             # Create DataFrame with the restored index to align back to input X
             res_df = pd.DataFrame(gen_feats)
             res_df.index = context_data['_original_index']
-            
+
             # Reindex to match original input X
             if isinstance(X, pd.DataFrame):
                 res_df = res_df.reindex(X.index)
             else:
                 # If X was array, _original_index is 0..N
                 res_df = res_df.sort_index()
-                
-            return res_df.values
 
-        if self.selection == 'fAnova':
-            gen_feats = self.fAnova_best.transform(gen_feats)
+            return res_df.values
 
         return gen_feats
 
