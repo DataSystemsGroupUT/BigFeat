@@ -1584,9 +1584,10 @@ class BigFeat:
         # Task 5: Use explicit context_data if provided, else fallback to global state
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_mean', window_size=window_size, time_step=time_step)
         else:
             # Fallback to original implementation
@@ -1611,9 +1612,10 @@ class BigFeat:
         """Safe rolling standard deviation using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_std', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1632,9 +1634,10 @@ class BigFeat:
         """Safe rolling minimum using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_min', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1653,9 +1656,10 @@ class BigFeat:
         """Safe rolling maximum using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_max', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1674,9 +1678,10 @@ class BigFeat:
         """Safe rolling median using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_median', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1695,9 +1700,10 @@ class BigFeat:
         """Safe rolling sum using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'rolling_sum', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1716,9 +1722,10 @@ class BigFeat:
         """Safe lag feature creation using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'lag', lag_period=lag_period)
         else:
             try:
@@ -1738,9 +1745,10 @@ class BigFeat:
         """Safe difference calculation using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'diff', lag_period=lag_period)
         else:
             try:
@@ -1760,9 +1768,10 @@ class BigFeat:
         """Safe percentage change using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if (self.feature_columns is not None and len(self.feature_columns) > 0) else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'pct_change', lag_period=lag_period)
         else:
             try:
@@ -1783,9 +1792,10 @@ class BigFeat:
         """Safe exponential moving average using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'ewm', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1808,9 +1818,10 @@ class BigFeat:
         """Safe momentum calculation using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'momentum', lag_period=lag_period)
         else:
             try:
@@ -1832,9 +1843,10 @@ class BigFeat:
         """Safe seasonal decomposition using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'seasonal_decompose')
         else:
             try:
@@ -1854,9 +1866,10 @@ class BigFeat:
         """Safe trend feature using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'trend', window_size=window_size, time_step=time_step)
         else:
             try:
@@ -1879,9 +1892,10 @@ class BigFeat:
         """Safe weekday mean using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'weekday_mean')
         else:
             # Fallback: create simple cyclical feature
@@ -1896,9 +1910,10 @@ class BigFeat:
         """Safe month mean using time-based operations"""
         data_source = context_data if context_data is not None else getattr(self, '_current_data', None)
         
-        if self.enable_time_series and data_source is not None and hasattr(self, '_current_feature_index'):
-            feature_col = self.feature_columns[
-                self._current_feature_index] if self.feature_columns else f'feature_{self._current_feature_index}'
+        if self.enable_time_series and data_source is not None:
+            feature_col = self._resolve_feature_col(kwargs.get('feature_index'))
+            if feature_col is None:
+                return self._clean_feature(feature_data)
             return self._apply_time_based_operation(data_source, feature_col, 'month_mean')
         else:
             # Fallback: create simple cyclical feature
@@ -1908,6 +1923,33 @@ class BigFeat:
             except Exception as e:
                 if self.verbose: print(f"Error in month_mean: {e}")
                 return feature_data
+
+    def _resolve_feature_col(self, feature_index=None):
+        """Map a feature index to its column name for time-based operations.
+
+        Pass feature_index explicitly wherever possible. The fallback to
+        self._current_feature_index exists only for the non-time-series
+        fallback paths and for backwards compatibility with recipes stored
+        before the index was recorded.
+
+        The shared-state version was ambiguous inside binary expression nodes:
+        the index is assigned as each leaf is resolved, but a time-series
+        operator reads it later, when the parent node fires. With two
+        different leaves the second one's index had already overwritten the
+        first, so both branches operated on the same -- often wrong -- column,
+        and which column that was depended on evaluation order rather than on
+        the recipe.
+        """
+        if feature_index is None:
+            feature_index = getattr(self, '_current_feature_index', None)
+        if feature_index is None:
+            return None
+
+        feature_index = int(feature_index)
+        if self.feature_columns is not None and len(self.feature_columns) > 0:
+            if 0 <= feature_index < len(self.feature_columns):
+                return self.feature_columns[feature_index]
+        return f'feature_{feature_index}'
 
     def _reset_fit_state(self):
         """Clear state carried over from any previous fit() on this object.
@@ -3036,15 +3078,37 @@ class BigFeat:
             return self._clean_feature(result)
 
         elif op in self.unary_operators:
+            # Note where this subtree's leaves begin, so we can identify which
+            # column the operator consumed rather than relying on shared state.
+            leaves_before = len(feat_ls)
             feat_1 = self.feat_with_depth(X, depth, op_ls, feat_ls, context_data)
+
+            # Record which input column this operator actually consumed, so the
+            # recipe is self-describing. Reading it off self._current_feature_index
+            # at apply time was ambiguous: inside a binary node the second leaf's
+            # index had already overwritten the first's by the time the parent
+            # operator ran.
+            #
+            # A unary operator applies to the value produced by its subtree. For
+            # a bare leaf that is unambiguous. For a deeper subtree there is no
+            # single source column, so we take the FIRST leaf of that subtree --
+            # matching what the old shared-state code did when it happened to be
+            # correct, and now stated explicitly in the recipe.
+            if self.enable_time_series and op in self.time_series_operators:
+                params = dict(params)
+                subtree_leaves = feat_ls[leaves_before:]
+                params['feature_index'] = (
+                    int(subtree_leaves[0]) if subtree_leaves else None
+                )
+
             op_ls.append((op, depth, params))
-            
+
             # Apply with parameters if time series operator
             if self.enable_time_series and op in self.time_series_operators:
                 result = op(feat_1, context_data=context_data, **params)
             else:
                 result = op(feat_1)
-                
+
             return self._clean_feature(result)
 
     def feat_with_depth_gen(self, X, depth, op_ls, feat_ls, context_data=None):

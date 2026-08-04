@@ -315,3 +315,61 @@ def test_preflight_check_actually_runs(periodic_data, capsys):
         f"{[l for l in out.splitlines() if 'CV Check skipped' in l]}"
     )
     assert "CV Result:" in out, "pre-flight check did not reach a verdict"
+
+
+# ---------------------------------------------------------------------------
+# Recipes must be self-describing, not dependent on shared instance state
+# ---------------------------------------------------------------------------
+
+def test_recipes_record_the_feature_they_consume(periodic_data):
+    """Time-series operators must carry their source column in the recipe."""
+    X, y = periodic_data
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", ts_operation_weight_multiplier=50.0,
+                    verbose=False)
+    bf.fit(X, y, **FIT_KWARGS)
+
+    ts_ops = [
+        (op, params)
+        for recipe in bf.tracking_ops
+        for op, _depth, params in recipe
+        if getattr(op, "__name__", "").startswith("_safe_")
+    ]
+    assert ts_ops, "fixture selected no time-series operators"
+    for op, params in ts_ops:
+        assert "feature_index" in params, (
+            f"{op.__name__} did not record which column it consumed; the "
+            f"recipe depends on shared _current_feature_index state"
+        )
+
+
+def test_transform_ignores_current_feature_index(periodic_data):
+    """Replay must not depend on the mutable _current_feature_index attribute.
+
+    The index used to be read off shared instance state at apply time. Inside
+    a binary node the second leaf's index had already overwritten the first's
+    before the parent operator ran, so which column a time-series operator
+    used depended on evaluation order rather than on the recipe.
+    """
+    X, y = periodic_data
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", ts_operation_weight_multiplier=50.0,
+                    verbose=False)
+    bf.fit(X, y, **FIT_KWARGS)
+
+    baseline = np.asarray(bf.transform(X), dtype=float)
+
+    bf._current_feature_index = 999  # nonsense; must be ignored
+    corrupted = np.asarray(bf.transform(X), dtype=float)
+    np.testing.assert_allclose(
+        baseline, corrupted, rtol=1e-9, atol=1e-9,
+        err_msg="transform() output changed when _current_feature_index was "
+                "corrupted, so recipes are not self-describing",
+    )
+
+    del bf._current_feature_index
+    without = np.asarray(bf.transform(X), dtype=float)
+    np.testing.assert_allclose(
+        baseline, without, rtol=1e-9, atol=1e-9,
+        err_msg="transform() depends on _current_feature_index existing",
+    )
