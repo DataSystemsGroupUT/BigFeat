@@ -16,8 +16,9 @@ venv
 *verify*
 
 # ...but the pytest suite is always tracked, even if a filename matches above.
-!tests/
-!tests/**
+# Keep this narrow: a blanket !tests/** would also re-include __pycache__.
+!tests/*.py
+!tests/*.json
 
 # Large intermediate data artifacts (e.g. OpenFE scratch files) must not be
 # committed; openfe_tmp_data.feather was tracked at ~20MB before this rule.

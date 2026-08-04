@@ -9,6 +9,9 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+markers = [
+    "slow: heavier cases (high ts_operation_weight_multiplier). Skip while iterating with -m 'not slow'; always run before committing.",
+]
 filterwarnings = [
     # BigFeat emits many benign numpy/pandas warnings during feature generation;
     # surface them without failing the suite.

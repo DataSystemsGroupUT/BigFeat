@@ -1,0 +1,86 @@
+{
+  "clf_nots": {
+    "detection_strategy": null,
+    "fit": {
+      "sha256": "fa9912a7a5cc59be16d44d34f0dcb92f18ac1357637acf350cca2b70d0603b33",
+      "shape": [
+        300,
+        7
+      ],
+      "sum": 58.8401
+    },
+    "n_features": 7,
+    "time_series_enabled": false,
+    "transform": {
+      "sha256": "fa9912a7a5cc59be16d44d34f0dcb92f18ac1357637acf350cca2b70d0603b33",
+      "shape": [
+        300,
+        7
+      ],
+      "sum": 58.8401
+    }
+  },
+  "reg_nots": {
+    "detection_strategy": null,
+    "fit": {
+      "sha256": "a3b4dac4bed41ecb950f8d7237da576b94c18ce71137079ba3f962664273ec89",
+      "shape": [
+        300,
+        6
+      ],
+      "sum": 6.8292
+    },
+    "n_features": 6,
+    "time_series_enabled": false,
+    "transform": {
+      "sha256": "a3b4dac4bed41ecb950f8d7237da576b94c18ce71137079ba3f962664273ec89",
+      "shape": [
+        300,
+        6
+      ],
+      "sum": 6.8292
+    }
+  },
+  "reg_ts_nonstationary": {
+    "detection_strategy": "pooled_ensemble",
+    "fit": {
+      "sha256": "1642b6470b1757f3cc8005b963ea0bdcb4beccc6b12d149be66e327a6899dd63",
+      "shape": [
+        300,
+        5
+      ],
+      "sum": 457.8691
+    },
+    "n_features": 5,
+    "time_series_enabled": true,
+    "transform": {
+      "sha256": "1642b6470b1757f3cc8005b963ea0bdcb4beccc6b12d149be66e327a6899dd63",
+      "shape": [
+        300,
+        5
+      ],
+      "sum": 457.8691
+    }
+  },
+  "reg_ts_periodic": {
+    "detection_strategy": "ensemble",
+    "fit": {
+      "sha256": "d8d086979204edb6211bfaf40626bed71a05a17bfb638e2b1cdfd6e516e35a7b",
+      "shape": [
+        300,
+        4
+      ],
+      "sum": 8.9428
+    },
+    "n_features": 4,
+    "time_series_enabled": true,
+    "transform": {
+      "sha256": "d8d086979204edb6211bfaf40626bed71a05a17bfb638e2b1cdfd6e516e35a7b",
+      "shape": [
+        300,
+        4
+      ],
+      "sum": 8.9428
+    }
+  }
+}
