@@ -549,3 +549,51 @@ def test_inverse_transform_target_is_a_noop_when_untransformed():
     assert bf.target_log_transformed is False
     preds = np.array([0.1, 0.5, 0.9])
     np.testing.assert_allclose(bf.inverse_transform_target(preds), preds)
+
+
+# ---------------------------------------------------------------------------
+# Block downsampling
+# ---------------------------------------------------------------------------
+
+def test_block_downsampling_discovers_on_a_sample_but_applies_to_all_rows():
+    """fit() may sample for feature DISCOVERY but must return every row.
+
+    This path had no test coverage while ~150 lines of it sat inline in
+    fit(). It is exercised here so the extraction into
+    _apply_block_downsampling stays honest.
+    """
+    n = 3000
+    rs = np.random.RandomState(0)
+    t = np.arange(n)
+    X = pd.DataFrame({
+        "date": pd.date_range("2015-01-01", periods=n, freq="D"),
+        "a": np.sin(2 * np.pi * t / 7) + rs.randn(n) * 0.05,
+        "b": rs.rand(n),
+    })
+    y = pd.Series(2 * X["a"].values + rs.randn(n) * 0.1)
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", enable_downsampling=True,
+                    max_fit_samples=600, verbose=False)
+    out = bf.fit(X, y, gen_size=3, iterations=2, random_state=0)
+
+    assert bf._was_downsampled is True, "downsampling did not engage"
+    assert out.shape[0] == n, (
+        f"fit() returned {out.shape[0]} rows for a {n}-row frame; discovery "
+        f"may sample but the returned features must cover every row"
+    )
+    assert np.isfinite(np.asarray(out, dtype=float)).all()
+    assert np.asarray(bf.transform(X)).shape[0] == n
+
+
+def test_downsampling_off_by_default():
+    """The default path must not silently sample."""
+    rs = np.random.RandomState(0)
+    n = 300
+    X = pd.DataFrame({f"f{i}": rs.rand(n) for i in range(4)})
+    y = pd.Series(rs.rand(n))
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="no",
+                    verbose=False)
+    bf.fit(X, y, **FIT_KWARGS)
+    assert bf._was_downsampled is False

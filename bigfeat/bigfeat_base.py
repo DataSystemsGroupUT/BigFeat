@@ -2000,6 +2000,173 @@ class BigFeat:
             return np.ones_like(weights) / max(len(weights), 1)
         return weights / total
 
+    def _apply_block_downsampling(self, X_features, y, gen_size, iterations):
+        """Select contiguous row blocks to bound memory during fit().
+
+        Returns (X_for_fit, y_for_fit) and sets self._was_downsampled.
+
+        Extracted verbatim from fit(), where it sat inline as ~150 lines
+        between feature extraction and estimator setup. Sampling contiguous
+        BLOCKS rather than random rows preserves the temporal continuity that
+        rolling features depend on; each block also carries a padding prefix
+        of prior rows so its first windows have real history, and a _block_id
+        so rolling operations never span a seam.
+        """
+        # === DYNAMIC MEMORY-AWARE DOWNSAMPLING LOGIC ===
+        # Intelligently adapts sample size based on available system memory
+        if self.enable_downsampling:
+            # 1. Get available system memory
+            mem = psutil.virtual_memory()
+            available_ram_bytes = mem.available
+
+            # 2. Estimate memory consumption
+            n_cols = X_features.shape[1]
+            estimated_features_generated = gen_size * iterations
+            bytes_per_row = (n_cols + estimated_features_generated) * 8 * 4
+
+            # 3. Calculate safe row limit
+            safe_ram_limit = available_ram_bytes * 0.5
+            dynamic_max_samples = int(safe_ram_limit / bytes_per_row)
+
+            # 4. Determine final limit
+            if self.max_fit_samples > 0:
+                limit = min(self.max_fit_samples, dynamic_max_samples)
+                limit_source = "user-defined" if limit == self.max_fit_samples else "memory-based"
+            else:
+                limit = dynamic_max_samples
+                limit_source = "fully dynamic"
+
+            # 5. Apply BLOCK SAMPLING if needed
+            if len(X_features) > limit:
+                if self.verbose:
+                    print(f"\n{'=' * 60}")
+                    print("CONTIGUOUS BLOCK SAMPLING ENABLED")
+                    print(f"{'=' * 60}")
+                    print(f"Available RAM: {available_ram_bytes / 1e9:.2f} GB")
+                    print(f"Dataset size: {len(X_features):,} rows → {limit:,} rows")
+
+                # === Calculate block parameters ===
+                # Determine padding size (max window needed for rolling ops)
+                padding_size = 0
+                if self.enable_time_series:
+                    if hasattr(self, 'window_detector') and hasattr(self.window_detector, 'max_window_days'):
+                         padding_size = self.window_detector.max_window_days
+                    elif hasattr(self, 'max_window_days'):
+                         padding_size = self.max_window_days
+                    else:
+                         padding_size = 365
+                    
+                    if self.verbose:
+                        print(f"  Padding size for rolling history: {padding_size}")
+
+                n_blocks, block_size = self._calculate_block_params(limit, padding=padding_size)
+
+                if self.verbose:
+                    print(f"\n📦 Block Sampling Strategy:")
+                    print(f"  Blocks: {n_blocks} × {block_size} rows")
+                    print(f"  Total: {n_blocks * block_size:,} rows")
+                    print(f"  Seed: {self.downsampling_random_state}")
+
+                # Create RNG
+                downsample_rng = np.random.RandomState(seed=self.downsampling_random_state)
+
+                # Calculate valid start positions
+                max_start = len(X_features) - block_size
+
+                if max_start < 0:
+                    # Dataset smaller than block - use all
+                    sample_indices = np.arange(len(X_features))
+                else:
+                    # Sample block starting positions
+                    n_blocks_actual = min(n_blocks, max_start + 1)
+                    start_indices = downsample_rng.choice(
+                        max_start + 1,
+                        n_blocks_actual,
+                        replace=False
+                    )
+
+                    # Generate contiguous blocks
+                    sample_indices = []
+                    block_ids_list = []
+                    for block_idx, start in enumerate(sorted(start_indices)):
+                        # Ensure we don't go out of bounds
+                        # Task Fix: Add padding for "warm-up" history
+                        actual_start = max(0, start - padding_size)
+                        end = min(start + block_size, len(X_features))
+                        
+                        indices = range(actual_start, end)
+                        sample_indices.extend(indices)
+                        block_ids_list.extend([block_idx] * len(indices))
+
+                    sample_indices = np.array(sample_indices)
+                    block_ids_array = np.array(block_ids_list)
+
+                    if self.verbose:
+                        print(f"\n  ✓ Sampled {n_blocks_actual} contiguous blocks:")
+                        for i, start in enumerate(sorted(start_indices)[:5]):  # Show first 5
+                            print(f"    Block {i + 1}: [{start:,} : {start + block_size - 1:,}]")
+                        if n_blocks_actual > 5:
+                            print(f"    ... and {n_blocks_actual - 5} more blocks")
+
+                # Apply sampling
+                X_features_sampled = X_features[sample_indices]
+                y_sampled = y[sample_indices] if y is not None else None
+
+                # Sync time series data
+                if self.enable_time_series and hasattr(self, '_current_data') and self._current_data is not None:
+                    if self.verbose:
+                        print(f"\n  ↻ Syncing time series data store...")
+                    self._full_current_data_backup = self._current_data
+
+                    if isinstance(self._current_data, pd.DataFrame):
+                        self._current_data = self._current_data.iloc[sample_indices].reset_index(drop=True)
+                        # Add block ID to prevent seams (Task 4)
+                        self._current_data['_block_id'] = block_ids_array
+                    else:
+                        # If simple array, convert to DF to support block IDs?
+                        # Probably unlikely to hit this execution path if enabling time series, as prepare_ts returns DF.
+                        self._current_data = self._current_data[sample_indices]
+
+                # Store metadata
+                self.n_rows_original = len(X_features)
+                self.n_rows_fit = len(X_features_sampled)
+                self._was_downsampled = True
+                self._downsampling_method = 'contiguous_blocks'
+                # Store original full data for final transform
+                self._X_features_full = X_features
+                # Defensive copy for original data
+                if isinstance(self.original_data, pd.DataFrame):
+                    self._original_data_full = self.original_data.copy()
+                else:
+                    self._original_data_full = self.original_data
+
+                if self.verbose:
+                    print(f"\n{'=' * 60}")
+                    reduction_pct = (1 - self.n_rows_fit / self.n_rows_original) * 100
+                    print(
+                        f"✓ SAMPLING COMPLETE: {self.n_rows_original:,} → {self.n_rows_fit:,} ({reduction_pct:.1f}% reduction)")
+                    print(f"\n✓ Phase Separation Strategy:")
+                    print(f"  1. LEARN features on {self.n_rows_fit:,} sampled rows (memory-safe)")
+                    print(f"  2. APPLY features to all {self.n_rows_original:,} rows (full coverage)")
+                    print(f"  → Output will match original dimensions")
+                    print(f"{'=' * 60}\n")
+
+                X_for_fit = X_features_sampled
+                y_for_fit = y_sampled
+
+            else:
+                # No downsampling needed
+                X_for_fit = X_features
+                y_for_fit = y
+                self._was_downsampled = False
+        else:
+            # Downsampling disabled
+            X_for_fit = X_features
+            y_for_fit = y
+            self._was_downsampled = False
+
+        return X_for_fit, y_for_fit
+
     def _calculate_block_params(self, total_limit, max_window_size=None, padding=0):
         """
         Calculate optimal block sampling parameters (detector-agnostic).
@@ -2334,159 +2501,9 @@ class BigFeat:
             if self.verbose:
                 print(f"✓ Time series data prepared and sorted with '{self.datetime_col}'")
 
-        # === DYNAMIC MEMORY-AWARE DOWNSAMPLING LOGIC ===
-        # Intelligently adapts sample size based on available system memory
-        if self.enable_downsampling:
-            # 1. Get available system memory
-            mem = psutil.virtual_memory()
-            available_ram_bytes = mem.available
-
-            # 2. Estimate memory consumption
-            n_cols = X_features.shape[1]
-            estimated_features_generated = gen_size * iterations
-            bytes_per_row = (n_cols + estimated_features_generated) * 8 * 4
-
-            # 3. Calculate safe row limit
-            safe_ram_limit = available_ram_bytes * 0.5
-            dynamic_max_samples = int(safe_ram_limit / bytes_per_row)
-
-            # 4. Determine final limit
-            if self.max_fit_samples > 0:
-                limit = min(self.max_fit_samples, dynamic_max_samples)
-                limit_source = "user-defined" if limit == self.max_fit_samples else "memory-based"
-            else:
-                limit = dynamic_max_samples
-                limit_source = "fully dynamic"
-
-            # 5. Apply BLOCK SAMPLING if needed
-            if len(X_features) > limit:
-                if self.verbose:
-                    print(f"\n{'=' * 60}")
-                    print("CONTIGUOUS BLOCK SAMPLING ENABLED")
-                    print(f"{'=' * 60}")
-                    print(f"Available RAM: {available_ram_bytes / 1e9:.2f} GB")
-                    print(f"Dataset size: {len(X_features):,} rows → {limit:,} rows")
-
-                # === Calculate block parameters ===
-                # Determine padding size (max window needed for rolling ops)
-                padding_size = 0
-                if self.enable_time_series:
-                    if hasattr(self, 'window_detector') and hasattr(self.window_detector, 'max_window_days'):
-                         padding_size = self.window_detector.max_window_days
-                    elif hasattr(self, 'max_window_days'):
-                         padding_size = self.max_window_days
-                    else:
-                         padding_size = 365
-                    
-                    if self.verbose:
-                        print(f"  Padding size for rolling history: {padding_size}")
-
-                n_blocks, block_size = self._calculate_block_params(limit, padding=padding_size)
-
-                if self.verbose:
-                    print(f"\n📦 Block Sampling Strategy:")
-                    print(f"  Blocks: {n_blocks} × {block_size} rows")
-                    print(f"  Total: {n_blocks * block_size:,} rows")
-                    print(f"  Seed: {self.downsampling_random_state}")
-
-                # Create RNG
-                downsample_rng = np.random.RandomState(seed=self.downsampling_random_state)
-
-                # Calculate valid start positions
-                max_start = len(X_features) - block_size
-
-                if max_start < 0:
-                    # Dataset smaller than block - use all
-                    sample_indices = np.arange(len(X_features))
-                else:
-                    # Sample block starting positions
-                    n_blocks_actual = min(n_blocks, max_start + 1)
-                    start_indices = downsample_rng.choice(
-                        max_start + 1,
-                        n_blocks_actual,
-                        replace=False
-                    )
-
-                    # Generate contiguous blocks
-                    sample_indices = []
-                    block_ids_list = []
-                    for block_idx, start in enumerate(sorted(start_indices)):
-                        # Ensure we don't go out of bounds
-                        # Task Fix: Add padding for "warm-up" history
-                        actual_start = max(0, start - padding_size)
-                        end = min(start + block_size, len(X_features))
-                        
-                        indices = range(actual_start, end)
-                        sample_indices.extend(indices)
-                        block_ids_list.extend([block_idx] * len(indices))
-
-                    sample_indices = np.array(sample_indices)
-                    block_ids_array = np.array(block_ids_list)
-
-                    if self.verbose:
-                        print(f"\n  ✓ Sampled {n_blocks_actual} contiguous blocks:")
-                        for i, start in enumerate(sorted(start_indices)[:5]):  # Show first 5
-                            print(f"    Block {i + 1}: [{start:,} : {start + block_size - 1:,}]")
-                        if n_blocks_actual > 5:
-                            print(f"    ... and {n_blocks_actual - 5} more blocks")
-
-                # Apply sampling
-                X_features_sampled = X_features[sample_indices]
-                y_sampled = y[sample_indices] if y is not None else None
-
-                # Sync time series data
-                if self.enable_time_series and hasattr(self, '_current_data') and self._current_data is not None:
-                    if self.verbose:
-                        print(f"\n  ↻ Syncing time series data store...")
-                    self._full_current_data_backup = self._current_data
-
-                    if isinstance(self._current_data, pd.DataFrame):
-                        self._current_data = self._current_data.iloc[sample_indices].reset_index(drop=True)
-                        # Add block ID to prevent seams (Task 4)
-                        self._current_data['_block_id'] = block_ids_array
-                    else:
-                        # If simple array, convert to DF to support block IDs?
-                        # Probably unlikely to hit this execution path if enabling time series, as prepare_ts returns DF.
-                        self._current_data = self._current_data[sample_indices]
-
-                # Store metadata
-                self.n_rows_original = len(X_features)
-                self.n_rows_fit = len(X_features_sampled)
-                self._was_downsampled = True
-                self._downsampling_method = 'contiguous_blocks'
-                # Store original full data for final transform
-                self._X_features_full = X_features
-                # Defensive copy for original data
-                if isinstance(self.original_data, pd.DataFrame):
-                    self._original_data_full = self.original_data.copy()
-                else:
-                    self._original_data_full = self.original_data
-
-                if self.verbose:
-                    print(f"\n{'=' * 60}")
-                    reduction_pct = (1 - self.n_rows_fit / self.n_rows_original) * 100
-                    print(
-                        f"✓ SAMPLING COMPLETE: {self.n_rows_original:,} → {self.n_rows_fit:,} ({reduction_pct:.1f}% reduction)")
-                    print(f"\n✓ Phase Separation Strategy:")
-                    print(f"  1. LEARN features on {self.n_rows_fit:,} sampled rows (memory-safe)")
-                    print(f"  2. APPLY features to all {self.n_rows_original:,} rows (full coverage)")
-                    print(f"  → Output will match original dimensions")
-                    print(f"{'=' * 60}\n")
-
-                X_for_fit = X_features_sampled
-                y_for_fit = y_sampled
-
-            else:
-                # No downsampling needed
-                X_for_fit = X_features
-                y_for_fit = y
-                self._was_downsampled = False
-        else:
-            # Downsampling disabled
-            X_for_fit = X_features
-            y_for_fit = y
-            self._was_downsampled = False
-
+        # === DYNAMIC MEMORY-AWARE DOWNSAMPLING ===
+        X_for_fit, y_for_fit = self._apply_block_downsampling(
+            X_features, y, gen_size, iterations)
         # === Original BigFeat initialization ===
         self.selection = selection
         self.imp_operators = np.ones(len(self.operators))
