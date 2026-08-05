@@ -902,53 +902,28 @@ class BigFeat:
                 grouped = data.groupby(groups, sort=False, group_keys=False)[feature_col]
                 
                 if operation == 'rolling_mean':
-                    # OPTIMIZATION: Global rolling with masking
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).mean().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'mean', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'mean', groups)
                          
                 elif operation == 'rolling_std':
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).std().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'std', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'std', groups)
                          
                 elif operation == 'rolling_min':
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).min().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'min', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'min', groups)
                          
                 elif operation == 'rolling_max':
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).max().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'max', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'max', groups)
                          
                 elif operation == 'rolling_median':
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).median().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'median', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'median', groups)
                          
                 elif operation == 'rolling_sum':
-                    w_size = self._resolve_lag_period(window_size, data)
-                    if isinstance(w_size, int):
-                         result = data[feature_col].rolling(window=w_size, min_periods=1).sum().fillna(0).values
-                         result = self._apply_group_mask(result, data, groups, w_size)
-                    else:
-                         result = self._vectorized_rolling(grouped, window_size, 'sum', data, groups)
+                    result = self._time_based_rolling(
+                        data, feature_col, window_size, 'sum', groups)
                     
                 elif operation == 'lag':
                     lag_period = self._resolve_lag_period(lag_period, data)
@@ -1108,18 +1083,18 @@ class BigFeat:
                 series = data[feature_col]
                 
                 if operation == 'rolling_mean':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'mean')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'mean', groups)
                 elif operation == 'rolling_std':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'std')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'std', groups)
                     result = np.nan_to_num(result)
                 elif operation == 'rolling_min':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'min')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'min', groups)
                 elif operation == 'rolling_max':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'max')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'max', groups)
                 elif operation == 'rolling_median':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'median')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'median', groups)
                 elif operation == 'rolling_sum':
-                    result = self._vectorized_rolling_global(data, feature_col, window_size, 'sum')
+                    result = self._time_based_rolling(data, feature_col, window_size, 'sum', groups)
                 
                 elif operation == 'lag':
                     lag_period = self._resolve_lag_period(lag_period, data)
@@ -1250,28 +1225,121 @@ class BigFeat:
         return max(1, window_size.days) # Simplified
 
     def _estimate_window_rows(self, period, data):
-        """Estimate number of rows for a time period"""
-        # If period is integer, return it
+        """Estimate a row count for a time period, from the DATA's own spacing.
+
+        This is a fallback for the few operations that still need an integer
+        window (EWM spans, and lag periods where the caller did not supply a
+        frequency). Time-based rolling no longer routes through here -- see
+        _time_based_rolling.
+
+        The previous implementation converted using self.time_step, which
+        defaults to 'D', so a 90-day window became 90 ROWS regardless of how
+        the data was actually sampled. On monthly data a 90-day window should
+        span 3 rows; it spanned 90, i.e. the whole series. Measured against
+        genuine time-based rolling on the Monash benchmark datasets, 100% of
+        rows were wrong on every frequency tested.
+
+        Now the spacing is measured from the data when possible.
+        """
         if isinstance(period, (int, np.integer)):
-            return period
-        
-        # If period is string/Timedelta
+            return int(period)
+
         if isinstance(period, str):
             period = pd.Timedelta(period)
-            
-        # Simplistic conversion: 1 day = 1 row?
-        # Better: check average time step of data?
-        # But for vectorized speed, we might just assume 1 if not calculable.
-        # Actually, let's look at self.time_step
-        if self.time_step == 'D':
-            return max(1, period.days)
-        elif self.time_step == 'H':
-            return max(1, int(period.total_seconds() / 3600))
-        elif self.time_step == 'M': return max(1, period.days // 30)
-        elif self.time_step == 'Q': return max(1, period.days // 90)
-        elif self.time_step == 'Y': return max(1, period.days // 365)
-        # ...
-        return max(1, period.days)
+
+        median_step = self._median_time_step(data)
+        if median_step is not None and median_step > pd.Timedelta(0):
+            return max(1, int(round(period / median_step)))
+
+        # No usable timestamps: fall back to the configured nominal step.
+        step_to_delta = {
+            'D': pd.Timedelta(days=1), 'H': pd.Timedelta(hours=1),
+            'h': pd.Timedelta(hours=1), 'W': pd.Timedelta(days=7),
+            'M': pd.Timedelta(days=30), 'Q': pd.Timedelta(days=91),
+            'Y': pd.Timedelta(days=365),
+        }
+        nominal = step_to_delta.get(self.time_step, pd.Timedelta(days=1))
+        return max(1, int(round(period / nominal)))
+
+    def _median_time_step(self, data):
+        """Median spacing between consecutive timestamps, or None.
+
+        Uses the median rather than the mean so that gaps between entities --
+        or an occasional missing observation -- do not distort the estimate.
+        """
+        if self.datetime_col is None or not hasattr(data, 'columns'):
+            return None
+        if self.datetime_col not in data.columns:
+            return None
+        try:
+            ts = pd.to_datetime(data[self.datetime_col])
+            groups = [c for c in self.groupby_cols if c in data.columns]
+            if groups:
+                diffs = ts.groupby([data[c] for c in groups]).diff().dropna()
+            else:
+                diffs = ts.sort_values().diff().dropna()
+            if len(diffs) == 0:
+                return None
+            step = diffs.median()
+            return step if step > pd.Timedelta(0) else None
+        except Exception:
+            return None
+
+    def _time_based_rolling(self, data, feature_col, window_size, func, groups):
+        """Rolling aggregation over a genuine time window.
+
+        Replaces the previous row-count approximation. A pd.Timedelta window
+        is passed straight to pandas, which selects rows by timestamp, so the
+        window means the same thing regardless of sampling frequency or of
+        calendar units having unequal lengths (28-31 day months, 90-92 day
+        quarters, 365-366 day years).
+
+        This also fixes a second defect in the old grouped path: it rolled
+        GLOBALLY across the whole frame and masked the first rows of each
+        group afterwards, so a group's early rows averaged in the preceding
+        group's values before being zeroed. Grouping happens before rolling
+        here, so values never cross an entity or block boundary.
+        """
+        if isinstance(window_size, str):
+            window_size = pd.Timedelta(window_size)
+
+        # An integer window has no time semantics; honour it as a row count.
+        if isinstance(window_size, (int, np.integer)):
+            if groups:
+                res = data.groupby(groups, sort=False)[feature_col].rolling(
+                    window=int(window_size), min_periods=1)
+                res = getattr(res, func)().reset_index(level=list(range(len(groups))),
+                                                       drop=True)
+                return res.reindex(data.index).fillna(0).values
+            res = data[feature_col].rolling(window=int(window_size), min_periods=1)
+            return getattr(res, func)().fillna(0).values
+
+        # Time-based window: pandas requires a monotonic datetime index.
+        ts = pd.to_datetime(data[self.datetime_col])
+        frame = pd.DataFrame({feature_col: data[feature_col].values,
+                              '_ts': ts.values}, index=data.index)
+        for col in groups:
+            frame[col] = data[col].values
+
+        if groups:
+            pieces = []
+            for _, chunk in frame.groupby(groups, sort=False):
+                chunk = chunk.sort_values('_ts')
+                rolled = getattr(
+                    chunk.set_index('_ts')[feature_col].rolling(window_size,
+                                                                min_periods=1),
+                    func)()
+                pieces.append(pd.Series(rolled.values, index=chunk.index))
+            out = pd.concat(pieces).reindex(data.index)
+        else:
+            ordered = frame.sort_values('_ts')
+            rolled = getattr(
+                ordered.set_index('_ts')[feature_col].rolling(window_size,
+                                                              min_periods=1),
+                func)()
+            out = pd.Series(rolled.values, index=ordered.index).reindex(data.index)
+
+        return out.fillna(0).values
 
     def _apply_time_based_operation_loop(self, data, feature_col, operation, window_size=None, lag_period=None, time_step=None):
         """

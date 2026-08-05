@@ -373,3 +373,130 @@ def test_transform_ignores_current_feature_index(periodic_data):
         baseline, without, rtol=1e-9, atol=1e-9,
         err_msg="transform() depends on _current_feature_index existing",
     )
+
+
+# ---------------------------------------------------------------------------
+# Time-based windows must mean the same thing at every sampling frequency
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("freq,expected_rows_in_90d", [
+    ("D", 90),    # daily      -> 90 rows
+    ("W", 13),    # weekly     -> ~13 rows
+    ("ME", 3),    # monthly    -> ~3 rows
+    ("QE", 1),    # quarterly  -> ~1 row
+])
+def test_time_window_spans_the_right_number_of_rows(freq, expected_rows_in_90d):
+    """A 90-day window must select by timestamp, not by row count.
+
+    Windows are detected as pd.Timedelta but every live path used to convert
+    them to a row count via self.time_step, which defaults to 'D'. A 90-day
+    window therefore became 90 ROWS at every frequency: on monthly data it
+    averaged 90 months instead of 3, i.e. the whole series. Measured against
+    genuine time-based rolling on the Monash benchmark data, 100% of rows
+    were wrong at every frequency tested.
+    """
+    # NOTE: this must exercise the GROUPED path. With no groupby_cols the old
+    # code routed to _vectorized_rolling_global, which already rolled by time
+    # correctly; the row-count approximation lived only in the grouped branch
+    # -- which is the one the benchmarks actually use (groupby_cols=item_id).
+    n = 120
+    df = pd.DataFrame({
+        "date": pd.date_range("2000-01-31", periods=n, freq=freq),
+        "item": ["A"] * n,
+        "v": np.arange(n, dtype=float),
+    })
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", groupby_cols=["item"], verbose=False)
+    bf.enable_time_series = True
+    bf.datetime_col = "date"
+    bf.groupby_cols = ["item"]
+    bf.feature_columns = ["v"]
+
+    got = np.asarray(
+        bf._apply_time_based_operation(df, "v", "rolling_mean",
+                                       window_size=pd.Timedelta(days=90)),
+        dtype=float,
+    )
+
+    expected = (df.set_index("date")["v"]
+                  .rolling("90D", min_periods=1).mean().values)
+    np.testing.assert_allclose(
+        got, expected, rtol=1e-9, atol=1e-9,
+        err_msg=f"90-day rolling window is wrong at freq={freq}",
+    )
+
+    # Sanity-check the fixture really distinguishes the two behaviours: the
+    # row-count approximation would average a different number of rows.
+    n_rows = df.set_index("date")["v"].rolling("90D").count().iloc[-1]
+    assert abs(n_rows - expected_rows_in_90d) <= 2, (
+        f"fixture drift: a 90D window spans {n_rows} rows at freq={freq}, "
+        f"expected about {expected_rows_in_90d}"
+    )
+
+
+def test_rolling_does_not_leak_across_entity_boundaries():
+    """A group's early rows must not average in the previous group's values.
+
+    The old grouped path rolled globally over the whole frame and masked the
+    first rows of each group afterwards, so those rows were computed from the
+    preceding entity's data before being zeroed.
+    """
+    n_per = 40
+    df = pd.DataFrame({
+        "date": list(pd.date_range("2021-01-01", periods=n_per, freq="D")) * 2,
+        "item": ["A"] * n_per + ["B"] * n_per,
+        "v": list(np.zeros(n_per)) + list(np.full(n_per, 1000.0)),
+    })
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", groupby_cols=["item"], verbose=False)
+    bf.enable_time_series = True
+    bf.datetime_col = "date"
+    bf.groupby_cols = ["item"]
+    bf.feature_columns = ["v"]
+
+    got = np.asarray(
+        bf._apply_time_based_operation(df, "v", "rolling_mean",
+                                       window_size=pd.Timedelta(days=7)),
+        dtype=float,
+    )
+
+    a_rows = df["item"].values == "A"
+    b_rows = df["item"].values == "B"
+    # A is entirely zeros, B entirely 1000. Neither may contaminate the other.
+    np.testing.assert_allclose(got[a_rows], 0.0, atol=1e-9,
+                               err_msg="entity A picked up entity B's values")
+    np.testing.assert_allclose(got[b_rows], 1000.0, atol=1e-9,
+                               err_msg="entity B was diluted by entity A's values")
+
+
+def test_time_window_handles_irregular_sampling():
+    """Genuinely irregular timestamps: the window is defined by time, not rows.
+
+    No dataset in the benchmark suite exercises this -- the Monash format
+    stores only a start timestamp plus a dense array, so every series is
+    uniform by construction. This fixture covers it directly.
+    """
+    rs = np.random.RandomState(0)
+    # Random gaps of 1-10 days.
+    offsets = np.cumsum(rs.randint(1, 11, size=80))
+    dates = pd.Timestamp("2021-01-01") + pd.to_timedelta(offsets, unit="D")
+    df = pd.DataFrame({"date": dates, "item": ["A"] * 80,
+                       "v": np.arange(80, dtype=float)})
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", groupby_cols=["item"], verbose=False)
+    bf.enable_time_series = True
+    bf.datetime_col = "date"
+    bf.groupby_cols = ["item"]
+    bf.feature_columns = ["v"]
+
+    got = np.asarray(
+        bf._apply_time_based_operation(df, "v", "rolling_mean",
+                                       window_size=pd.Timedelta(days=30)),
+        dtype=float,
+    )
+    expected = (df.set_index("date")["v"]
+                  .rolling("30D", min_periods=1).mean().values)
+    np.testing.assert_allclose(got, expected, rtol=1e-9, atol=1e-9)
