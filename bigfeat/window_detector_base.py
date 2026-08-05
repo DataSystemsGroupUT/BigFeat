@@ -162,6 +162,43 @@ class BaseWindowDetector:
 
         return [pd.Timedelta(days=d) for d in valid[:self.n_windows]]
 
+    def infer_sampling_rate(self, df, datetime_col, groupby_cols=None) -> str:
+        """Infer a pandas frequency alias from the data's own timestamps.
+
+        Detectors work in SAMPLES and convert to days via the sampling rate.
+        Callers routinely left that at its 'D' default, so monthly or
+        quarterly observations were treated as daily and every detected
+        period came out 30-90x too small -- on the Monash monthly data the
+        ensemble selected windows of 1-6 days for series sampled once a
+        month. Measuring the spacing here removes that whole class of error.
+        """
+        if datetime_col is None or not hasattr(df, 'columns'):
+            return 'D'
+        if datetime_col not in df.columns:
+            return 'D'
+        try:
+            ts = pd.to_datetime(df[datetime_col])
+            groups = [c for c in (groupby_cols or []) if c in df.columns]
+            if groups:
+                diffs = ts.groupby([df[c] for c in groups]).diff().dropna()
+            else:
+                diffs = ts.sort_values().diff().dropna()
+            if not len(diffs):
+                return 'D'
+            days = diffs.median().total_seconds() / 86400.0
+        except Exception:
+            return 'D'
+
+        if days <= 0:
+            return 'D'
+        # Snap to the nearest standard alias.
+        for alias, nominal in (('s', 1 / 86400), ('min', 1 / 1440), ('h', 1 / 24),
+                               ('D', 1.0), ('W', 7.0), ('M', 30.0),
+                               ('Q', 91.0), ('Y', 365.0)):
+            if days <= nominal * 1.5:
+                return alias
+        return 'Y'
+
     def assess_periodicity(self, df, datetime_col, feature_cols,
                            groupby_cols=None) -> Tuple[bool, float, Dict]:
         """Decide whether the data is periodic enough to justify TS features.
@@ -176,9 +213,11 @@ class BaseWindowDetector:
         features for the whole frame -- and the three classes disagreed while
         exposing an identically named method.
         """
+        rate = self.infer_sampling_rate(df, datetime_col, groupby_cols)
         try:
             _, confidences = self.detect_optimal_windows(
-                df, datetime_col, feature_cols, groupby_cols=groupby_cols)
+                df, datetime_col, feature_cols, sampling_rate=rate,
+                groupby_cols=groupby_cols)
         except Exception as exc:
             if self.verbose:
                 print(f"  {self.STRATEGY_NAME}: periodicity assessment failed: {exc}")
@@ -208,16 +247,20 @@ class BaseWindowDetector:
         is_periodic, confidence, _ = self.assess_periodicity(
             df, datetime_col, feature_cols, groupby_cols)
 
+        rate = self.infer_sampling_rate(df, datetime_col, groupby_cols)
+
         if is_periodic:
             windows, _ = self.detect_optimal_windows(
-                df, datetime_col, feature_cols, groupby_cols=groupby_cols)
+                df, datetime_col, feature_cols, sampling_rate=rate,
+                groupby_cols=groupby_cols)
             return windows, self.STRATEGY_NAME
 
         if confidence >= self.confidence_threshold * 0.6:
             # Weak but non-zero signal: blend detected windows with defaults.
             try:
                 detected, _ = self.detect_optimal_windows(
-                    df, datetime_col, feature_cols, groupby_cols=groupby_cols)
+                    df, datetime_col, feature_cols, sampling_rate=rate,
+                    groupby_cols=groupby_cols)
             except Exception:
                 detected = []
             merged = sorted({*detected, *self._get_default_windows()})

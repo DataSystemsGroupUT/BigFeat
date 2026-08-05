@@ -178,3 +178,58 @@ def test_ensemble_still_enables_time_series_on_periodic_data():
     assert bf.enable_time_series is True, \
         "time series was disabled on a clean 7/30-day seasonal signal"
     assert bf.window_sizes, "no window sizes selected"
+
+
+def test_sampling_rate_is_inferred_from_the_data():
+    """Detectors must not assume daily sampling.
+
+    Detectors work in SAMPLES and convert to days via sampling_rate. The
+    ensemble path never passed one, so it defaulted to 'D' and monthly or
+    quarterly observations were treated as daily -- every detected period
+    came out 30-90x too small.
+    """
+    det = DFTWindowDetector(verbose=False)
+    for freq, expected in (("D", "D"), ("W", "W"), ("ME", "M"), ("QE", "Q")):
+        df = pd.DataFrame({
+            "date": pd.date_range("2000-01-31", periods=60, freq=freq),
+            "item": ["A"] * 60,
+            "v": np.arange(60, dtype=float),
+        })
+        got = det.infer_sampling_rate(df, "date", ["item"])
+        assert got == expected, (
+            f"freq={freq}: inferred {got!r}, expected {expected!r}"
+        )
+
+
+def test_pooled_windows_keep_the_long_scales():
+    """Truncating the pooled window list must not drop every large window.
+
+    The ensemble sorted pooled candidates ascending then took the first
+    n_windows, which always discarded the LONG windows. Pooling three
+    detectors reliably yields more than n_windows candidates, so on monthly
+    data this left windows of 1-6 days for series sampled once a month.
+    """
+    rs = np.random.RandomState(0)
+    n = 120
+    t = np.arange(n)
+    df = pd.DataFrame({
+        "date": pd.date_range("2000-01-31", periods=n, freq="ME"),
+        "item": ["A"] * n,
+        "v": np.sin(2 * np.pi * t / 12) * 10 + t * 0.1 + rs.randn(n) * 0.2,
+    })
+    y = pd.Series(df["v"].values)
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="auto",
+                    datetime_col="date", groupby_cols=["item"], verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        bf.fit(df, y, gen_size=2, iterations=1, random_state=0)
+
+    if not bf.enable_time_series:
+        pytest.skip("fixture did not enable time series")
+
+    days = sorted(w.days for w in bf.window_sizes)
+    assert max(days) > 30, (
+        f"all pooled windows are short ({days}) for monthly data; the long "
+        f"scales were truncated away"
+    )

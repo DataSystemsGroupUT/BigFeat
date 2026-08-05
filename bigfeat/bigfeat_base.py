@@ -565,12 +565,29 @@ class BigFeat:
                 
                 # Process pooled windows: Remove duplicates and limit to n_windows
                 if all_candidate_windows:
-                    self.window_sizes = sorted(list(set(all_candidate_windows)))
-                    
-                    # If we have too many windows, strictly limit to n_windows to avoid explosion
-                    if len(self.window_sizes) > self.n_windows:
-                        self.window_sizes = self.window_sizes[:self.n_windows]
-                        
+                    unique_windows = sorted(set(all_candidate_windows))
+
+                    # Keep a spread across the detected scale range rather than
+                    # the n smallest.
+                    #
+                    # This used to be `sorted(...)[:n_windows]`, which truncates
+                    # an ascending list and therefore always discards the LARGE
+                    # windows. Pooling three detectors reliably produces more
+                    # than n_windows candidates, so the long-range windows were
+                    # dropped every time. On the Monash monthly data that left
+                    # windows of 1-6 DAYS for series sampled once a month --
+                    # every rolling feature collapsed to a single observation.
+                    #
+                    # Sampling at even quantiles keeps the shortest and longest
+                    # detected scales plus a spread between them.
+                    if len(unique_windows) > self.n_windows:
+                        idx = np.linspace(0, len(unique_windows) - 1,
+                                          self.n_windows).round().astype(int)
+                        self.window_sizes = [unique_windows[i] for i in sorted(set(idx))]
+                    else:
+                        self.window_sizes = unique_windows
+
+
                     self.detection_strategy = "pooled_ensemble"
                     self.window_detector_type = "ensemble"
                 else:
