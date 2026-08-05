@@ -500,3 +500,52 @@ def test_time_window_handles_irregular_sampling():
     expected = (df.set_index("date")["v"]
                   .rolling("30D", min_periods=1).mean().values)
     np.testing.assert_allclose(got, expected, rtol=1e-9, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# The automatic target log-transform must be discoverable and reversible
+# ---------------------------------------------------------------------------
+
+def test_log_transform_is_reported_and_invertible():
+    """fit() log-transforms skewed regression targets; say so, and undo it.
+
+    The flag recording this was private and never read anywhere in the
+    codebase, so a caller fitting their own model against the same target had
+    no way to learn that feature selection had been scored against a
+    log-scaled version of it.
+    """
+    n = 200
+    rs = np.random.RandomState(0)
+    # Strictly positive and heavily right-skewed -> triggers the transform.
+    y = pd.Series(np.exp(rs.randn(n) * 2.0) + 1.0)
+    X = pd.DataFrame({f"f{i}": rs.rand(n) for i in range(4)})
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="no",
+                    verbose=False)
+    bf.fit(X, y, **FIT_KWARGS)
+
+    assert hasattr(bf, "target_log_transformed")
+    assert bf.target_log_transformed is True, (
+        f"skew={y.skew():.2f} should have triggered the log-transform"
+    )
+
+    # The inverse must round-trip the transform fit() applied internally.
+    original = np.array([1.0, 10.0, 100.0])
+    round_tripped = bf.inverse_transform_target(np.log1p(original))
+    np.testing.assert_allclose(round_tripped, original, rtol=1e-9)
+
+
+def test_inverse_transform_target_is_a_noop_when_untransformed():
+    """Always safe to call, whether or not the transform fired."""
+    rs = np.random.RandomState(0)
+    n = 150
+    X = pd.DataFrame({f"f{i}": rs.rand(n) for i in range(4)})
+    y = pd.Series(rs.rand(n))  # symmetric -> no transform
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="no",
+                    verbose=False)
+    bf.fit(X, y, **FIT_KWARGS)
+
+    assert bf.target_log_transformed is False
+    preds = np.array([0.1, 0.5, 0.9])
+    np.testing.assert_allclose(bf.inverse_transform_target(preds), preds)

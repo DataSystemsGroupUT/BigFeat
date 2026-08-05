@@ -153,6 +153,12 @@ class BigFeat:
         self.n_jobs = -1
         self.operators = [np.multiply, np.add, np.subtract, np.abs, np.square]
         self.binary_operators = [np.multiply, np.add, np.subtract]
+        # NOTE: original_feat (an identity passthrough) is listed here but
+        # NOT in self.operators, and feat_with_depth samples exclusively from
+        # self.operators -- so it can never actually be selected. Left as-is
+        # deliberately: adding it would change which features get generated,
+        # and there is no evidence that an identity operator helps. It is
+        # reachable only via the `op in self.unary_operators` arity check.
         self.unary_operators = [np.abs, np.square, local_utils.original_feat]
         self.task_type = task_type
         self.verbose = verbose
@@ -1148,84 +1154,7 @@ class BigFeat:
                 print(f"    Warning: Time-based operation {operation} failed for {feature_col}: {str(e)}")
             return np.zeros(len(data))
 
-    def _vectorized_rolling(self, grouped, window_size, func, data, groups):
-        """Helper for vectorized rolling on groupby"""
-        # Determine if we can use integer window
-        use_int_window = isinstance(window_size, (int, np.integer))
-        
-        if use_int_window:
-            # Integer window - preserves original index in MultiIndex (groups..., orig_idx)
-            roller = grouped.rolling(window=window_size, min_periods=1)
-            if func == 'mean': res = roller.mean()
-            elif func == 'std': res = roller.std()
-            elif func == 'min': res = roller.min()
-            elif func == 'max': res = roller.max()
-            elif func == 'median': res = roller.median()
-            elif func == 'sum': res = roller.sum()
-            
-            # Align back to original index
-            # Drop group levels (0 to n-1)
-            # Result index: (g1, g2, ..., orig_idx)
-            # Since data is pre-sorted by groups, the result values are already aligned with data.values
-            return res.values
-        else:
-            # Time-based window - Requires 'on' parameter and merging
-            # If using 'on', we need to pass the rolling object differently
-            # grouped.rolling(..., on=...) not directly available on SeriesGroupBy object easily in strict vector way without setup
-            
-            # Hybrid approach: Use integer approximation if possible, or accept loop for time-based if irregular?
-            # Or use apply which is safer but slower?
-            # Let's try to map generic time window to integer if data is regular-ish
-            # BUT user asked for '7D' specifically.
-            
-            # Fallback to loop for time-based windows on groups to ensure correctness if 'on' is complex
-            # OR try the merge strategy
-            
-            # Let's use the loop LOGIC for time-based properties if we can't vectorize easily WITHOUT bugs.
-            # But the requirement is to fix performance.
-            # Iterative groupby is the bottleneck.
-            
-            # If we assume 'daily' step for data, convert '7D' to 7.
-            # Most data in BigFeat context is likely treated as steps.
-            # But let's check if we can convert.
-            
-            est_rows = self._estimate_window_rows(window_size, data)
-            return self._vectorized_rolling(grouped, est_rows, func, data, groups)
 
-    def _vectorized_rolling_global(self, data, feature_col, window_size, func):
-        """Helper for global rolling"""
-        series = data[feature_col]
-        
-        # Sort temporarily by time for global calculation if needed
-        # Since we switched to Group-First sorting, the global data might not be time-sorted
-        if self.datetime_col in data.columns:
-             temp_data = data.sort_values(self.datetime_col)
-             series_for_rolling = temp_data[feature_col]
-             
-             if isinstance(window_size, (int, np.integer)):
-                 roller = series_for_rolling.rolling(window=window_size, min_periods=1)
-             else:
-                 roller = temp_data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
-        else:
-             series_for_rolling = series
-             if isinstance(window_size, (int, np.integer)):
-                 roller = series.rolling(window=window_size, min_periods=1)
-             else:
-                 # Should not happen if datetime_col is missing but just in case
-                 roller = data.rolling(window=window_size, on=self.datetime_col, min_periods=1)[feature_col]
-        
-        if func == 'mean': res = roller.mean()
-        elif func == 'std': res = roller.std()
-        elif func == 'min': res = roller.min()
-        elif func == 'max': res = roller.max()
-        elif func == 'median': res = roller.median()
-        elif func == 'sum': res = roller.sum()
-        
-        if self.datetime_col in data.columns:
-             # Align back to the original (Group-sorted) index
-             return res.reindex(data.index).values
-        else:
-             return res.values
 
     def _resolve_lag_period(self, lag_period, data):
         """Resolve lag period to integer"""
@@ -1590,50 +1519,6 @@ class BigFeat:
                 print(f"    Warning: Operation {operation} failed: {str(e)}")
             return pd.Series(0, index=series.index)
 
-    def _apply_group_mask(self, result, data, groups, w_size):
-        """
-        Apply mask to result array to prevent data leakage between groups in global rolling.
-        Sets the first (w_size - 1) elements of each group to 0.
-        """
-        if groups is None or len(groups) == 0:
-            return result
-            
-        try:
-            # Calculate group boundaries
-            # This identifies rows where the group key is different from the previous row
-            # Since data is sorted by group, this finds the start of each new time series
-            group_mask = data[groups].ne(data[groups].shift()).any(axis=1)
-            
-            # Get indices where groups change
-            change_indices = np.where(group_mask)[0]
-            
-            # Ensure the very first index (0) is treated as a start
-            if 0 not in change_indices:
-                change_indices = np.insert(change_indices, 0, 0)
-            
-            # Mask the beginning of each group
-            # For a rolling window of size W, the first W-1 points are invalid
-            # because they would include data from the previous group
-            mask_len = int(w_size) - 1
-            if mask_len <= 0:
-                return result
-                
-            # Efficient masking
-            # If many groups, we can optimize further, but this loop is O(n_groups)
-            if mask_len > 0:
-                 # Create an array of indices to mask for all groups at once
-                 offsets = np.arange(mask_len)
-                 mask_indices = (change_indices[:, None] + offsets).flatten()
-                 # Filter indices within bounds
-                 mask_indices = mask_indices[mask_indices < len(result)]
-                 result[mask_indices] = 0
-                
-            return result
-            
-        except Exception as e:
-            if self.verbose:
-                print(f"Warning: Group masking failed: {e}")
-            return result
 
     # Time Series Utility Methods
     def _clean_feature(self, feature_data):
@@ -2063,6 +1948,19 @@ class BigFeat:
             if hasattr(self, attr):
                 delattr(self, attr)
 
+    def inverse_transform_target(self, y_pred):
+        """Map predictions back to the original target scale.
+
+        fit() log-transforms strictly positive, highly skewed regression
+        targets (skew > 2) before scoring feature importances. If you trained
+        a downstream model on that same transformed target, pass its
+        predictions through here. If target_log_transformed is False this is
+        a no-op, so it is always safe to call.
+        """
+        if not getattr(self, 'target_log_transformed', False):
+            return y_pred
+        return np.expm1(np.asarray(y_pred, dtype=float))
+
     @property
     def effective_ts_weight_multiplier(self):
         """The TS operator weight multiplier in force for the current fit.
@@ -2235,8 +2133,16 @@ class BigFeat:
             self.original_data = X
 
         # --- Automatic Target Scaling (Log-Transform) ---
-        # For strictly positive and highly skewed regression targets
-        self._target_log_transformed = False
+        # For strictly positive and highly skewed regression targets.
+        #
+        # NOTE: this rebinds the local `y` only, so the caller's array is not
+        # modified. The transform affects which features get SELECTED, via the
+        # importance scoring below -- it does not change what fit() returns.
+        # The flag was previously private and never read anywhere, which made
+        # the behaviour invisible; it is now public and paired with
+        # inverse_transform_target() so callers who fit a model against a
+        # log-scaled target can map predictions back.
+        self.target_log_transformed = False
         if self.task_type == 'regression':
             try:
                 # Convert y to series for easy checks
@@ -2248,7 +2154,7 @@ class BigFeat:
                              print(f"  → High skewness detected (skew={skewness:.2f}). Applying log-transform to target.")
                          
                          y = np.log1p(y)
-                         self._target_log_transformed = True
+                         self.target_log_transformed = True
             except Exception as e:
                 if self.verbose: 
                     print(f"Warning: Target scaling check failed: {e}")
@@ -2585,14 +2491,12 @@ class BigFeat:
         self.selection = selection
         self.imp_operators = np.ones(len(self.operators))
         self.operator_weights = self.imp_operators / self.imp_operators.sum()
-        self.gen_steps = []
         if n_features is not None:
              self.n_feats = n_features
         else:
              self.n_feats = X_for_fit.shape[1]
         self.n_rows = X_for_fit.shape[0]
         self.ig_vector = np.ones(self.n_feats) / self.n_feats
-        self.comb_mat = np.ones((self.n_feats, self.n_feats))
         self.split_vec = np.ones(self.n_feats)
 
         # Set RNG seed
@@ -3379,35 +3283,6 @@ class BigFeat:
             importance_sum += total_importances
         return importance_sum, total_estimators
 
-    def get_weighted_feature_importances(self, X, y, estimator, random_state):
-        """Return feature importances weighted by model performance - Original method"""
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=random_state)
-
-        if self.task_type == 'classification':
-            estm = RandomForestClassifier(random_state=random_state, n_jobs=self.n_jobs)
-        else:
-            estm = RandomForestRegressor(random_state=random_state, n_jobs=self.n_jobs)
-
-        estm.fit(X_train, y_train)
-        ests = estm.estimators_
-        model = estm
-        imps = np.zeros((len(model.estimators_), X.shape[1]))
-        scores = np.zeros(len(model.estimators_))
-
-        for i, each in enumerate(model.estimators_):
-            if self.task_type == 'classification':
-                y_probas_train = each.predict_proba(X_test)[:, 1]
-                score = roc_auc_score(y_test, y_probas_train)
-            else:
-                y_pred_train = each.predict(X_test)
-                score = r2_score(y_test, y_pred_train)
-
-            imps[i] = each.feature_importances_
-            scores[i] = score
-
-        weights = scores / scores.sum()
-        return np.average(imps, axis=0, weights=weights)
 
     def check_correlations(self, feats):
         """ Check correlations among the selected features - Robust method """
@@ -3463,12 +3338,6 @@ class BigFeat:
                 new_list.append(current)
         return new_list
 
-    def get_combos(self, paths, comb_mat):
-        """ Fills Combination matrix with values - Original method """
-        for i in range(len(comb_mat)):
-            for pt in paths:
-                if i in pt:
-                    comb_mat[i][pt] += 1
 
     def get_split_feats(self, paths, split_vec):
         """ Fills split vector with values - Original method """
