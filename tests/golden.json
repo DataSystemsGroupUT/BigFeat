@@ -44,22 +44,22 @@
   "reg_ts_nonstationary": {
     "detection_strategy": "pooled_ensemble",
     "fit": {
-      "sha256": "1642b6470b1757f3cc8005b963ea0bdcb4beccc6b12d149be66e327a6899dd63",
+      "sha256": "f77f352c9558b7c4bfde751a5955ff255c8b75f10e9c2fb772f60fbc68f3d563",
       "shape": [
         300,
         5
       ],
-      "sum": 457.8691
+      "sum": 424.3303
     },
     "n_features": 5,
     "time_series_enabled": true,
     "transform": {
-      "sha256": "1642b6470b1757f3cc8005b963ea0bdcb4beccc6b12d149be66e327a6899dd63",
+      "sha256": "f77f352c9558b7c4bfde751a5955ff255c8b75f10e9c2fb772f60fbc68f3d563",
       "shape": [
         300,
         5
       ],
-      "sum": 457.8691
+      "sum": 424.3303
     }
   },
   "reg_ts_periodic": {

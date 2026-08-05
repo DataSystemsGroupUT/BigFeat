@@ -5,8 +5,10 @@ from scipy.signal import find_peaks
 from typing import List, Tuple, Dict, Optional
 import warnings
 
+from bigfeat.window_detector_base import BaseWindowDetector
 
-class LombScargleWindowDetector:
+
+class LombScargleWindowDetector(BaseWindowDetector):
     """
     Lomb-Scargle Periodogram based window size detection for BigFeat.
 
@@ -22,6 +24,8 @@ class LombScargleWindowDetector:
     - Astronomical/environmental time series
     - Data with gaps
     """
+
+    STRATEGY_NAME = 'lomb_scargle'
 
     def __init__(self,
                  min_window_days: int = 3,
@@ -54,58 +58,15 @@ class LombScargleWindowDetector:
         verbose : bool
             Whether to print progress messages
         """
-        self.min_window_days = min_window_days
-        self.max_window_days = max_window_days
-        self.n_windows = n_windows
-        self.confidence_threshold = confidence_threshold
+        super().__init__(min_window_days=min_window_days,
+                         max_window_days=max_window_days,
+                         n_windows=n_windows,
+                         confidence_threshold=confidence_threshold,
+                         verbose=verbose)
         self.min_peak_power = min_peak_power
         self.min_peak_prominence = min_peak_prominence
         self.n_frequencies = n_frequencies
-        self.verbose = verbose
 
-    def detect_datetime_column(self, df: pd.DataFrame) -> Optional[str]:
-        """Automatically detect datetime column in DataFrame"""
-        datetime_candidates = []
-
-        for col in df.columns:
-            col_dtype = str(df[col].dtype)
-
-            if col_dtype.startswith('datetime') or col_dtype.startswith('<M8'):
-                datetime_candidates.append((col, 'explicit'))
-                continue
-
-            if col_dtype == 'object':
-                try:
-                    sample = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else None
-                    if sample is not None:
-                        if hasattr(sample, 'year') and hasattr(sample, 'month'):
-                            datetime_candidates.append((col, 'object_datetime'))
-                        else:
-                            pd.to_datetime(sample)
-                            datetime_candidates.append((col, 'string_datetime'))
-                except:
-                    continue
-
-            col_lower = col.lower()
-            if any(hint in col_lower for hint in ['date', 'time', 'timestamp', 'datetime']):
-                if col not in [c[0] for c in datetime_candidates]:
-                    datetime_candidates.append((col, 'name_hint'))
-
-        if datetime_candidates:
-            explicit = [c for c in datetime_candidates if c[1] == 'explicit']
-            if explicit:
-                if self.verbose:
-                    print(f"Auto-detected datetime column: '{explicit[0][0]}'")
-                return explicit[0][0]
-
-            if self.verbose:
-                print(
-                    f"Auto-detected datetime column: '{datetime_candidates[0][0]}' (type: {datetime_candidates[0][1]})")
-            return datetime_candidates[0][0]
-
-        if self.verbose:
-            print("Warning: No datetime column detected")
-        return None
 
     def _preprocess_signal(self, series: np.ndarray) -> np.ndarray:
         """
@@ -336,121 +297,6 @@ class LombScargleWindowDetector:
 
         return window_sizes, confidence_scores
 
-    def _generate_multiscale_windows(self, detected_periods: List[float]) -> List[pd.Timedelta]:
-        """Generate multi-scale windows from detected periods"""
-        unique_periods = list(set([int(p) for p in detected_periods if p > 0]))
 
-        # Add harmonics and sub-harmonics
-        multi_scale_periods = []
-        for period in unique_periods:
-            if period >= 4:
-                multi_scale_periods.append(period // 2)  # Sub-harmonic
-            multi_scale_periods.append(period)  # Fundamental
-            multi_scale_periods.append(period * 2)  # Harmonic
-            if period <= self.max_window_days // 4:
-                multi_scale_periods.append(period * 4)  # 2nd harmonic
 
-        # Remove duplicates and apply constraints
-        multi_scale_periods = sorted(set([
-            p for p in multi_scale_periods
-            if self.min_window_days <= p <= self.max_window_days
-        ]))
 
-        # Select evenly spaced windows if we have too many
-        if len(multi_scale_periods) > self.n_windows:
-            indices = np.linspace(0, len(multi_scale_periods) - 1, self.n_windows, dtype=int)
-            selected_periods = [multi_scale_periods[i] for i in indices]
-        else:
-            selected_periods = multi_scale_periods
-
-        # Ensure we have at least some windows
-        if not selected_periods:
-            selected_periods = [self.min_window_days]
-
-        # Convert to Timedelta
-        window_sizes = [pd.Timedelta(days=int(p)) for p in selected_periods]
-
-        return window_sizes
-
-    def _get_default_windows(self) -> List[pd.Timedelta]:
-        """Return default window sizes when Lomb-Scargle detection fails"""
-        default_days = [7, 14, 30, 90, 180, 365]
-        default_days = [d for d in default_days
-                        if self.min_window_days <= d <= self.max_window_days]
-        return [pd.Timedelta(days=d) for d in default_days[:self.n_windows]]
-
-    def assess_periodicity(self,
-                           df: pd.DataFrame,
-                           datetime_col: str,
-                           feature_cols: List[str],
-                           groupby_cols: Optional[List[str]] = None) -> Tuple[bool, float, Dict[str, float]]:
-        """
-        Assess if time series data exhibits strong periodicity using Lomb-Scargle
-
-        Parameters:
-        -----------
-        df : DataFrame
-            Time series data
-        datetime_col : str
-            Name of datetime column
-        feature_cols : list
-            List of feature columns to analyze
-
-        Returns:
-        --------
-        is_periodic : bool
-            Whether data exhibits strong periodicity
-        avg_confidence : float
-            Average confidence score across features
-        feature_confidences : dict
-            Individual confidence scores per feature
-        """
-        _, confidence_scores = self.detect_optimal_windows(
-            df, datetime_col, feature_cols, groupby_cols=groupby_cols
-        )
-
-        if not confidence_scores:
-            return False, 0.0, {}
-
-        avg_confidence = float(np.mean(list(confidence_scores.values())))
-        is_periodic = bool(avg_confidence >= self.confidence_threshold)
-
-        if self.verbose:
-            print(f"\nLomb-Scargle Periodicity Assessment:")
-            print(f"  Average confidence: {avg_confidence:.3f}")
-            print(f"  Threshold: {self.confidence_threshold}")
-            print(f"  Result: {'PERIODIC' if is_periodic else 'NON-PERIODIC'}")
-
-        return is_periodic, avg_confidence, confidence_scores
-
-    def smart_window_selection(self,
-                               df: pd.DataFrame,
-                               datetime_col: str,
-                               feature_cols: List[str],
-                               groupby_cols: Optional[List[str]] = None) -> Tuple[List[pd.Timedelta], str]:
-        """
-        Smart window selection with hybrid strategy
-        Compatible with BigFeat's DFTWindowDetector API
-        """
-        windows, confidence_scores = self.detect_optimal_windows(
-            df, datetime_col, feature_cols, groupby_cols=groupby_cols
-        )
-
-        if not confidence_scores:
-            return self._get_default_windows(), 'standard'
-
-        avg_confidence = float(np.mean(list(confidence_scores.values())))
-
-        if avg_confidence >= self.confidence_threshold:
-            strategy = 'lomb_scargle'
-        elif avg_confidence > self.confidence_threshold * 0.6:
-            # Hybrid: combine Lomb-Scargle with standard windows
-            standard_windows = self._get_default_windows()
-            combined = list(set(windows + standard_windows))
-            combined_sorted = sorted(combined, key=lambda x: x.days)[:self.n_windows]
-            return combined_sorted, 'hybrid'
-        else:
-            strategy = 'standard'
-            windows = self._get_default_windows()
-
-        return windows, strategy

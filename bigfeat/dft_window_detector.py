@@ -4,12 +4,16 @@ from scipy.fft import fft, fftfreq
 from typing import List, Tuple, Dict, Optional, Union
 import warnings
 
+from bigfeat.window_detector_base import BaseWindowDetector
 
-class DFTWindowDetector:
+
+class DFTWindowDetector(BaseWindowDetector):
     """
     Automated window size detection using Discrete Fourier Transform (DFT)
     for BigFeat time series feature engineering.
     """
+
+    STRATEGY_NAME = 'dft'
 
     def __init__(self,
                  min_window_days: int = 3,
@@ -34,74 +38,12 @@ class DFTWindowDetector:
         verbose : bool
             Whether to print progress messages
         """
-        self.min_window_days = min_window_days
-        self.max_window_days = max_window_days
-        self.n_windows = n_windows
-        self.confidence_threshold = confidence_threshold
-        self.verbose = verbose
+        super().__init__(min_window_days=min_window_days,
+                         max_window_days=max_window_days,
+                         n_windows=n_windows,
+                         confidence_threshold=confidence_threshold,
+                         verbose=verbose)
 
-    def detect_datetime_column(self, df: pd.DataFrame) -> Optional[str]:
-        """
-        Automatically detect datetime column in DataFrame
-
-        Parameters:
-        -----------
-        df : DataFrame
-            Input dataframe
-
-        Returns:
-        --------
-        str or None
-            Name of detected datetime column, or None if not found
-        """
-        datetime_candidates = []
-
-        for col in df.columns:
-            col_dtype = str(df[col].dtype)
-
-            # Check for explicit datetime types
-            if col_dtype.startswith('datetime') or col_dtype.startswith('<M8'):
-                datetime_candidates.append((col, 'explicit'))
-                continue
-
-            # Check for object columns that might be datetime
-            if col_dtype == 'object':
-                try:
-                    # Try parsing a sample
-                    sample = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else None
-                    if sample is not None:
-                        if hasattr(sample, 'year') and hasattr(sample, 'month'):
-                            datetime_candidates.append((col, 'object_datetime'))
-                        else:
-                            # Try parsing as string
-                            pd.to_datetime(sample)
-                            datetime_candidates.append((col, 'string_datetime'))
-                except:
-                    continue
-
-            # Check column name hints
-            col_lower = col.lower()
-            if any(hint in col_lower for hint in ['date', 'time', 'timestamp', 'datetime']):
-                if col not in [c[0] for c in datetime_candidates]:
-                    datetime_candidates.append((col, 'name_hint'))
-
-        if datetime_candidates:
-            # Prioritize explicit datetime types
-            explicit = [c for c in datetime_candidates if c[1] == 'explicit']
-            if explicit:
-                if self.verbose:
-                    print(f"Auto-detected datetime column: '{explicit[0][0]}'")
-                return explicit[0][0]
-
-            # Otherwise return first candidate
-            if self.verbose:
-                print(
-                    f"Auto-detected datetime column: '{datetime_candidates[0][0]}' (type: {datetime_candidates[0][1]})")
-            return datetime_candidates[0][0]
-
-        if self.verbose:
-            print("Warning: No datetime column detected")
-        return None
 
     def _preprocess_signal(self, series: np.ndarray) -> np.ndarray:
         """
@@ -187,18 +129,39 @@ class DFTWindowDetector:
         if len(magnitudes) < 2:
             return 0.0
 
-        sorted_mags = np.sort(magnitudes)[::-1]
+        magnitudes = np.asarray(magnitudes, dtype=float)
+        peak = magnitudes.max()
+        if not np.isfinite(peak) or peak <= 0:
+            return 0.0
 
-        # Avoid division by zero
-        if sorted_mags[0] > 0:
-            confidence = 1.0 - (sorted_mags[1] / sorted_mags[0])
-        else:
-            confidence = 0.0
+        # Peak-to-background ratio.
+        #
+        # This was previously `1 - sorted[1] / sorted[0]`, which is close to
+        # the OPPOSITE of what it claims to measure. np.sort places the two
+        # largest bins adjacent to each other, and for a genuinely periodic
+        # signal those two are neighbouring frequency bins of the SAME peak,
+        # split by spectral leakage. Their ratio is therefore near 1 for
+        # strong periodicity, driving the confidence toward 0. Measured on a
+        # clean 7-day sine wave the detector reported confidence 0.244 and
+        # periodic=False, while on white noise it reported 0.075 -- barely
+        # distinguishable, and both below the 0.3 threshold.
+        #
+        # Comparing the peak against the MEDIAN of the spectrum is the
+        # standard approach: the median is robust to the handful of bins that
+        # carry a real signal, so it estimates the noise floor. A pure sine
+        # gives a very large ratio, white noise gives a ratio near 1.
+        background = np.median(magnitudes)
+        if background <= 0:
+            # Degenerate spectrum (e.g. a constant series): no periodicity.
+            return 0.0
 
-        # Ensure confidence is in [0, 1]
-        confidence = np.clip(confidence, 0.0, 1.0)
+        ratio = peak / background
+        # Map the ratio onto [0, 1). ratio == 1 (no peak above background)
+        # gives 0; large ratios saturate toward 1. The scale factor is chosen
+        # so that a ratio of ~10 lands near the 0.75 mark.
+        confidence = 1.0 - np.exp(-(ratio - 1.0) / 6.0)
 
-        return confidence
+        return float(np.clip(confidence, 0.0, 1.0))
 
     def detect_optimal_windows(self,
                                df: pd.DataFrame,
@@ -380,102 +343,8 @@ class DFTWindowDetector:
 
         return window_sizes, confidence_scores
 
-    def _convert_to_days(self, period_samples: float, sampling_rate: str) -> float:
-        """
-        Convert period in samples to days based on sampling rate
 
-        Parameters:
-        -----------
-        period_samples : float
-            Period in number of samples
-        sampling_rate : str
-            Sampling rate ('D', 'H', 'W', 'M', etc.)
 
-        Returns:
-        --------
-        float
-            Period in days
-        """
-        # Convert sampling rate to days per sample
-        rate_to_days = {
-            'D': 1.0,  # Daily
-            'H': 1 / 24.0,  # Hourly
-            'W': 7.0,  # Weekly
-            'M': 30.0,  # Monthly (approximate)
-            'Q': 90.0,  # Quarterly (approximate)
-            'Y': 365.0  # Yearly (approximate)
-        }
-
-        days_per_sample = rate_to_days.get(sampling_rate, 1.0)
-        return period_samples * days_per_sample
-
-    def _generate_multiscale_windows(self, detected_periods: List[float]) -> List[pd.Timedelta]:
-        """
-        Generate multi-scale windows from detected periods
-
-        Parameters:
-        -----------
-        detected_periods : list
-            List of detected periods in days
-
-        Returns:
-        --------
-        list of pd.Timedelta
-            Multi-scale window sizes
-        """
-        unique_periods = list(set([int(p) for p in detected_periods if p > 0]))
-
-        # Add harmonics and sub-harmonics
-        multi_scale_periods = []
-        for period in unique_periods:
-            if period >= 4:  # Only add sub-harmonic if period is large enough
-                multi_scale_periods.append(period // 2)  # Sub-harmonic
-
-            multi_scale_periods.append(period)  # Fundamental
-            multi_scale_periods.append(period * 2)  # Harmonic
-
-            if period <= self.max_window_days // 4:
-                multi_scale_periods.append(period * 4)  # 2nd harmonic
-
-        # Remove duplicates and apply constraints
-        multi_scale_periods = sorted(set([
-            p for p in multi_scale_periods
-            if self.min_window_days <= p <= self.max_window_days
-        ]))
-
-        # Select top n_windows by even spacing
-        if len(multi_scale_periods) > self.n_windows:
-            indices = np.linspace(0, len(multi_scale_periods) - 1,
-                                  self.n_windows, dtype=int)
-            selected_periods = [multi_scale_periods[i] for i in indices]
-        else:
-            selected_periods = multi_scale_periods
-
-        # Ensure we have at least some windows
-        if not selected_periods:
-            selected_periods = [self.min_window_days]
-
-        # Convert to Timedelta
-        window_sizes = [pd.Timedelta(days=int(p)) for p in selected_periods]
-
-        if self.verbose:
-            print(f"\nGenerated {len(window_sizes)} window sizes: {[w.days for w in window_sizes]} days")
-
-        return window_sizes
-
-    def _get_default_windows(self) -> List[pd.Timedelta]:
-        """
-        Return default window sizes when DFT fails
-
-        Returns:
-        --------
-        list of pd.Timedelta
-            Default window sizes
-        """
-        default_days = [7, 14, 30, 90, 180, 365]
-        default_days = [d for d in default_days
-                        if self.min_window_days <= d <= self.max_window_days]
-        return [pd.Timedelta(days=d) for d in default_days[:self.n_windows]]
 
     COMMON_SEASONALITIES = [7, 14, 30, 90, 180, 365]
 
@@ -507,117 +376,4 @@ class DFTWindowDetector:
                 sanitized.append(d)
         return sanitized
 
-    def assess_periodicity(self,
-                           df: pd.DataFrame,
-                           datetime_col: str,
-                           feature_cols: List[str],
-                           groupby_cols: Optional[List[str]] = None) -> Tuple[bool, float, Dict[str, float]]:
-        """
-        Assess if time series data exhibits strong periodicity
 
-        Parameters:
-        -----------
-        df : DataFrame
-            Time series data
-        datetime_col : str
-            Name of datetime column
-        feature_cols : list
-            List of feature columns to analyze
-
-        Returns:
-        --------
-        is_periodic : bool
-            Whether data exhibits strong periodicity
-        avg_confidence : float
-            Average confidence score across features
-        feature_confidences : dict
-            Individual confidence scores per feature
-        """
-        _, confidence_scores = self.detect_optimal_windows(
-            df, datetime_col, feature_cols, groupby_cols=groupby_cols
-        )
-
-        if not confidence_scores:
-            return False, 0.0, {}
-
-        # Calculate consensus metrics
-        # Count how many features pass the threshold individually
-        periodic_features_count = sum(1 for conf in confidence_scores.values() if float(conf) >= self.confidence_threshold)
-        periodicity_ratio = periodic_features_count / len(feature_cols) if len(feature_cols) > 0 else 0
-
-        avg_confidence = float(np.mean(list(confidence_scores.values())))
-        
-        # New Requirement: Consensus
-        # Must meet average threshold AND at least 50% of features must be periodic
-        is_periodic = bool((avg_confidence >= self.confidence_threshold) and (periodicity_ratio >= 0.5))
-
-        if self.verbose:
-            print(f"  Consensus: {periodic_features_count}/{len(feature_cols)} features are periodic ({periodicity_ratio:.1%})")
-
-        if self.verbose:
-            print(f"\nPeriodicity Assessment:")
-            print(f"  Average confidence: {avg_confidence:.2f}")
-            print(f"  Threshold: {self.confidence_threshold}")
-            print(f"  Result: {'PERIODIC' if is_periodic else 'NON-PERIODIC'}")
-
-        return is_periodic, avg_confidence, confidence_scores
-
-    def smart_window_selection(self,
-                               df: pd.DataFrame,
-                               datetime_col: str,
-                               feature_cols: List[str],
-                               groupby_cols: Optional[List[str]] = None) -> Tuple[List[pd.Timedelta], str]:
-        """
-        Smart window selection with hybrid strategy
-
-        Returns DFT-detected windows for periodic data,
-        standard windows for non-periodic data,
-        or hybrid for moderate periodicity
-
-        Parameters:
-        -----------
-        df : DataFrame
-            Time series data
-        datetime_col : str
-            Name of datetime column
-        feature_cols : list
-            List of feature columns
-
-        Returns:
-        --------
-        window_sizes : list of pd.Timedelta
-            Selected window sizes
-        strategy : str
-            Strategy used ('dft', 'hybrid', 'standard')
-        """
-        dft_windows, confidence_scores = self.detect_optimal_windows(
-            df, datetime_col, feature_cols, groupby_cols=groupby_cols
-        )
-
-        if not confidence_scores:
-            if self.verbose:
-                print("Using standard windows (no valid DFT detection)")
-            return self._get_default_windows(), 'standard'
-
-        avg_confidence = float(np.mean(list(confidence_scores.values())))
-        
-        if avg_confidence >= self.confidence_threshold:
-            if self.verbose:
-                print(f"Using DFT-detected windows (strong periodicity, confidence={avg_confidence:.2f})")
-            return dft_windows, 'dft'
-
-        elif avg_confidence > self.confidence_threshold * 0.6:  # 0.5 * 0.6 = 0.3
-            # Hybrid approach: combine DFT with standard windows
-            if self.verbose:
-                print(f"Using hybrid windows (moderate periodicity, confidence={avg_confidence:.2f})")
-
-            standard_windows = self._get_default_windows()
-            combined = list(set(dft_windows + standard_windows))
-            combined_sorted = sorted(combined, key=lambda x: x.days)[:self.n_windows]
-
-            return combined_sorted, 'hybrid'
-
-        else:
-            if self.verbose:
-                print(f"Using standard windows (weak periodicity, confidence={avg_confidence:.2f})")
-            return self._get_default_windows(), 'standard'
