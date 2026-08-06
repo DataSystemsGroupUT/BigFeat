@@ -4,6 +4,9 @@ This document records a correctness review of BigFeat's time-series feature
 engineering, the defects it found, how each was verified, and what the changes
 mean for previously collected benchmark results.
 
+For how the library works — the generation loop, feature replay, the
+time-series subsystem — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Scope.** Twelve commits on `feature/time-series-ops`, starting from
 `a9021c8` ("Time series major release"). The classic (non-time-series) BigFeat
 core is largely untouched except where a defect was shared between both paths.

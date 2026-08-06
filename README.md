@@ -205,6 +205,10 @@ if you train a downstream model on the same transformed target.
 
 ## Development
 
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the library works:
+  the generation loop, how features are represented and replayed, the
+  time-series subsystem, and where the rough edges are. **Start here if you
+  are modifying the code.**
 - [`docs/CORRECTNESS_FIXES.md`](docs/CORRECTNESS_FIXES.md) — correctness review
   of the time-series subsystem: defects found, how each was verified, and the
   benchmark impact. **Read this before relying on results collected before the
