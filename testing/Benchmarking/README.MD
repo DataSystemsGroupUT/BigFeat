@@ -291,3 +291,76 @@ If you use this benchmark in your research, please cite:
 ## License
 
 MIT License - See LICENSE file for details
+---
+
+## Practical notes
+
+Added after running the suite during the correctness review documented in
+[`../../docs/CORRECTNESS_FIXES.md`](../../docs/CORRECTNESS_FIXES.md).
+
+### Runtime
+
+A full run is **roughly 172 hours**, derived from the wall times in the
+committed `benchmark_results/*.json`:
+
+| Method | Datasets | Mean wall time | Total |
+|---|---|---|---|
+| `bigfeat_yes_dft` | 24 | 6005 s | 40.0 h |
+| `bigfeat_yes_lomb_scargle` | 24 | 5998 s | 40.0 h |
+| `bigfeat_auto_ensemble` | 24 | 5635 s | 37.6 h |
+| `bigfeat_yes_acf` | 24 | 5512 s | 36.7 h |
+| `bigfeat_no_standard` | 24 | 1428 s | 9.5 h |
+| `tsfresh` | 18 | 980 s | 4.9 h |
+| `openfe` | 22 | 517 s | 3.2 h |
+| `baseline` | 24 | 111 s | 0.7 h |
+
+Scope a run before starting one:
+
+```bash
+python benchmark.py --datasets m1_monthly tourism_quarterly \
+                    --methods baseline auto_ensemble \
+                    --output-dir ./benchmark_results
+python benchmark.py --quick-test    # 3 small datasets
+```
+
+### Sampling regularity of the datasets
+
+All 25 datasets declare a regular frequency, and the GluonTS format stores only
+a `start` timestamp plus a dense `target` array — timestamps are reconstructed
+as `start + i * freq`, so **every series is uniformly sampled by
+construction**. Irregular sampling is not representable in this format.
+
+However, 13 of the 25 have **non-uniform spacing in days**, because calendar
+units are not fixed durations:
+
+| Frequency | Datasets | Distinct gaps |
+|---|---|---|
+| M (monthly) | 8 | 4 (28–31 days) |
+| Q (quarterly) | 3 | 3 (90–92 days) |
+| Y (yearly) | 3 | 2 (365–366 days) |
+| D / W / h | 12 | 1 (uniform) |
+
+This is exactly where a row-count approximation of a time window cannot be
+correct, and it was the source of the most consequential defect found in the
+review (`CORRECTNESS_FIXES.md` §2.9).
+
+Two consequences worth knowing:
+
+- **The Lomb-Scargle detector has no dataset here that exercises its
+  advantage.** It exists specifically for irregularly sampled data, which this
+  archive cannot represent. Claims about its relative merit need a different
+  data source.
+- **16 of 25 datasets are ragged** (unequal series lengths), which matters for
+  any per-series aggregation.
+
+### Repository size
+
+The `datasets/` and `datasets/exported_datasets/` trees hold roughly **2.3 GB**,
+with several individual CSVs over 200 MB — above GitHub's 100 MB per-file
+limit. They are regenerable:
+
+```bash
+python datasets/download_datasets.py
+```
+
+Prefer regenerating over committing them.

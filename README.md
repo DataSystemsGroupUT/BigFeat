@@ -26,37 +26,29 @@ Ensure you have Python 3.8+ installed. BigFeat requires specific versions of Pyt
    ```
 
 3. **Install Dependencies**:
-   Use the provided `requirements.txt` to install all required packages with their exact versions:
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt              # library runtime deps
+   pip install -r requirements-benchmark.txt    # optional: benchmarking suite
    ```
 
-   The `requirements.txt` includes:
-   ```
-   bigfeat==0.1
-   joblib==1.4.2
-   lightgbm==4.6.0
-   numpy==2.2.5
-   pandas==2.2.3
-   python-dateutil==2.9.0.post0
-   pytz==2025.2
-   scikit-learn==1.6.1
-   scipy==1.15.2
-   six==1.17.0
-   threadpoolctl==3.6.0
-   tzdata==2025.2
-   ```
+   `requirements.txt` pins the six packages the library itself imports:
+   `lightgbm`, `numpy`, `pandas`, `psutil`, `scikit-learn`, `scipy`. The
+   benchmark file adds the heavier evaluation-only dependencies (`gluonts`,
+   `openfe`, `stumpy`, `tsfresh`, `yfinance`, `matplotlib`, `seaborn`,
+   `statsmodels`, `pyarrow`).
 
 4. **Install BigFeat**:
-   If not already installed via `requirements.txt`, install BigFeat locally:
    ```bash
-   pip install .
+   pip install .          # or: pip install -e .  for development
    ```
 
-   Alternatively, install directly from the source:
+5. **Run the tests** (optional but recommended):
    ```bash
-   pip install ./BigFeat
+   pip install pytest
+   pytest                 # 91 tests, ~85 s
+   pytest -m "not slow"   # fast subset, ~58 s
    ```
+   See [`tests/README.md`](tests/README.md) for what the suite covers.
 
 ## Usage
 
@@ -153,6 +145,75 @@ for dataset, target, task_type in datasets:
 - `check_corr`: Whether to check and remove highly correlated features.
 - `selection`: Feature selection method ('stability' or 'fAnova').
 - `combine_res`: Whether to combine results across iterations.
+
+`random_state` fully determines the output: two fits with the same seed produce
+identical features without the caller needing to seed NumPy globally.
+
+## Time Series Features
+
+BigFeat can detect temporal structure in a dataset and generate time-aware
+features (rolling statistics, lags, differences, EWM, seasonal decomposition)
+alongside the standard arithmetic ones.
+
+```python
+bf = bigfeat.BigFeat(
+    task_type='regression',
+    enable_time_series='auto',   # 'auto' | 'yes' | 'no'
+    datetime_col='timestamp',
+    groupby_cols=['item_id'],    # one entity per series
+)
+X_train_feats = bf.fit(X_train, y_train, gen_size=5, iterations=3, random_state=0)
+X_test_feats  = bf.transform(X_test)
+```
+
+### How windows are chosen
+
+In `'auto'` mode BigFeat runs three periodicity detectors — DFT, ACF and
+Lomb-Scargle — and enables time-series features only if at least two agree the
+data is periodic (or one is highly confident). Window sizes are pooled from the
+agreeing detectors.
+
+Windows are genuine time spans, not row counts: a 90-day window covers 90 days
+of timestamps regardless of whether the data is sampled hourly, daily or
+monthly, and regardless of calendar units having unequal lengths. The sampling
+rate is measured from the data rather than assumed.
+
+Rolling operations never cross an entity boundary when `groupby_cols` is set,
+and all operators are causal — a row's features depend only on rows dated at or
+before it.
+
+### Key time-series parameters
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `enable_time_series` | `'auto'` | `'auto'` detects periodicity; `'yes'` forces on (requires `datetime_col`); `'no'` disables |
+| `datetime_col` | `None` | Timestamp column; auto-detected in `'auto'` mode |
+| `groupby_cols` | `[]` | Entity columns — rolling windows never span two entities |
+| `window_detector` | `'ensemble'` | `'dft'`, `'acf'`, `'lomb_scargle'` or `'ensemble'` |
+| `confidence_threshold` | `0.5` | Minimum periodicity confidence to enable TS features |
+| `min_window_days` / `max_window_days` | `1` / `365` | Bounds on detected windows |
+| `n_windows` | `6` | Number of window sizes to keep |
+| `enable_downsampling` | `False` | Memory-aware block sampling for feature *discovery*; `transform` still returns every row |
+
+### Regression targets
+
+For strictly positive, highly skewed regression targets (skew > 2), `fit`
+log-transforms the target internally before scoring feature importances. This
+does not modify your `y` array, but it does affect which features are selected.
+Check `bf.target_log_transformed` and use `bf.inverse_transform_target(preds)`
+if you train a downstream model on the same transformed target.
+
+## Development
+
+- [`docs/CORRECTNESS_FIXES.md`](docs/CORRECTNESS_FIXES.md) — correctness review
+  of the time-series subsystem: defects found, how each was verified, and the
+  benchmark impact. **Read this before relying on results collected before the
+  fixes**, which measured different behaviour than their configuration
+  describes.
+- [`tests/README.md`](tests/README.md) — test suite layout, design rationale,
+  and known coverage gaps.
+- [`testing/Benchmarking/`](testing/Benchmarking/) — evaluation harness over
+  the Monash time-series archive.
 
 ## Cite Us
 If you use BigFeat in your research, please cite the following paper:
