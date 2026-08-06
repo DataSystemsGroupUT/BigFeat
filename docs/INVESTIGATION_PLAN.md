@@ -1,46 +1,69 @@
-# Investigation Plan — Why Feature Engineering Isn't Helping
+# Investigation Plan — Measuring BigFeat Honestly
 
-A plan to establish *why* BigFeat's benchmark numbers look the way they do, and
-what — if anything — can move them. Written after the correctness review
-([CORRECTNESS_FIXES.md](CORRECTNESS_FIXES.md)) closed six defects without
-materially changing accuracy.
+A plan to establish what BigFeat's accuracy actually is on the fixed code, why
+the correctness fixes did not obviously improve it, and what could.
+
+Written after the correctness review
+([CORRECTNESS_FIXES.md](CORRECTNESS_FIXES.md)) closed six defects. A small
+post-fix A/B (12 datasets, single seed) showed accuracy roughly unchanged, but
+that sample is too small to conclude from — establishing the real number is
+Phase A, and it blocks most of what follows.
 
 ---
 
-## 0. The finding this plan exists to explain
+## 0. What the existing data does and does not show
 
-Analysis of the **committed** `benchmark_results/` (24 datasets, 8 methods,
-already measured — no re-run required):
+> **The committed `benchmark_results/` is STALE.** Those runs are dated
+> 2026-01-24 to 2026-02-12; the twelve correctness fixes landed 2026-08-04.
+> Every BigFeat number in that directory was produced by code with rolling
+> windows wrong on 100% of rows, a seasonality guard that had never executed,
+> and an inert `random_state`. **BigFeat rows below are not evidence about
+> current behaviour** and are shown only to motivate the re-run in Phase A.
 
-| Method | geo-mean MASE ratio vs baseline | Wins | Sign-test *p* |
-|---|---|---|---|
-| `openfe` | 1.001 | 12/22 | 0.42 |
-| `no_standard` (BigFeat, no TS) | 1.112 | 10/24 | 0.85 |
-| `yes_dft` | 1.121 | 11/24 | 0.73 |
-| `yes_lomb_scargle` | 1.148 | 10/24 | 0.85 |
-| `yes_acf` | 1.168 | 10/24 | 0.85 |
-| `auto_ensemble` | 1.201 | 8/24 | 0.97 |
-| `tsfresh` | 1.455 | 8/18 | 0.76 |
+Analysis of the committed summary (24 datasets, 8 methods):
 
-**No automated feature-engineering method — BigFeat, OpenFE, or tsfresh —
-beats the no-FE baseline at any conventional significance level.** Ratios above
-1.0 mean *worse* than baseline. Every *p* > 0.4, i.e. indistinguishable from a
-coin flip. `average_rankings.csv` agrees: `yes_dft` 3.69 vs `baseline` 3.88, a
-0.19-rank gap across 8 methods.
+| Method | geo-mean MASE ratio vs baseline | Wins | Sign-test *p* | Status |
+|---|---|---|---|---|
+| `openfe` | 1.001 | 12/22 | 0.42 | **valid** |
+| `tsfresh` | 1.455 | 8/18 | 0.76 | **valid** |
+| `no_standard` (BigFeat, no TS) | 1.112 | 10/24 | 0.85 | stale |
+| `yes_dft` | 1.121 | 11/24 | 0.73 | stale |
+| `yes_lomb_scargle` | 1.148 | 10/24 | 0.85 | stale |
+| `yes_acf` | 1.168 | 10/24 | 0.85 | stale |
+| `auto_ensemble` | 1.201 | 8/24 | 0.97 | stale |
 
-Two further negatives, from the same data:
+### What survives the staleness
 
-- **No frequency subgroup where BigFeat wins.** Ratios by frequency: D 1.103,
-  M 1.186, Q 1.156, W 1.179, Y 0.997, h 1.068. Yearly is the only one near
-  parity, on n=3.
-- **No dataset characteristic predicts success.** `corr(log n_series,
-  log MASE ratio) = −0.09` (n=24).
+**OpenFE and tsfresh do not touch BigFeat's code**, so the fixes cannot have
+changed them. Both were measured against the same baseline, on the same
+datasets, under the same harness. That gives one durable observation:
 
-This is a **negative result, and it is robust.** The plan below is built to
-explain it rather than to escape it. If the explanation turns out to be
-"AutoFE does not help on this benchmark," that is the finding, and it is
-publishable — OpenFE tying baseline at 1.001 suggests the ceiling is a property
-of the task, not of BigFeat.
+> A mature, independent AutoFE tool (OpenFE) ties the no-feature-engineering
+> baseline exactly — geo-ratio 1.001, 12/22 wins, *p* = 0.42. tsfresh is 45%
+> worse. Neither beats baseline at any conventional significance level.
+
+This is weak evidence that **the ceiling is a property of this benchmark**
+rather than of any one tool. It is the single most important input to the plan
+below, and it is unaffected by the correctness fixes.
+
+### What does not survive
+
+Every BigFeat row, and both sub-analyses that depended on them:
+
+- ~~No frequency subgroup where BigFeat wins~~ (D 1.103, M 1.186, Q 1.156,
+  W 1.179, Y 0.997, h 1.068) — computed from stale BigFeat numbers
+- ~~No dataset characteristic predicts success~~ (`corr(log n_series, log
+  ratio) = −0.09`) — same
+
+Both must be recomputed after Phase A. They are recorded here so the comparison
+can be made: if the post-fix run reproduces these patterns, the fixes were
+accuracy-neutral; if it does not, the difference is attributable and worth
+reporting.
+
+**The honest current position: BigFeat's accuracy relative to baseline is
+UNMEASURED on the fixed code.** The 12-dataset A/B in
+[CORRECTNESS_FIXES.md §4](CORRECTNESS_FIXES.md) is the only post-fix evidence,
+and it is underpowered (≤25 series, ≤120 rows, single seed).
 
 > **A note on framing.** "Improve the results" and "find out what is true" point
 > in different directions here. Searching configurations until something wins,
@@ -170,11 +193,12 @@ benchmark suite, a seasonality guard that had never once executed, a
 `random_state` parameter that did nothing, and look-ahead leakage in two
 operators. The corrected behaviour is now covered by 91 tests.
 
-**E2. Report the negative result honestly.** If Phase A confirms that no AutoFE
-method beats baseline on Monash, say so. OpenFE tying baseline at 1.001 is
-strong evidence this is a property of the benchmark rather than of BigFeat, and
-that is a more useful contribution than a fractional MASE improvement that will
-not replicate.
+**E2. Report whatever Phase A shows, including a negative result.** If the
+post-fix run confirms that no AutoFE method beats baseline on Monash, say so.
+OpenFE tying baseline at 1.001 -- a measurement unaffected by the fixes -- is
+already evidence that this may be a property of the benchmark rather than of
+BigFeat. A well-supported negative is a more useful contribution than a
+fractional MASE improvement that will not replicate.
 
 **E3. Pre-commit to the analysis.** Fix the primary metric (MASE), the
 comparison (paired across datasets), the test (Wilcoxon signed-rank or a CD
@@ -191,9 +215,13 @@ B1 B2 B3  (parallel, hours)  ──▶ diagnosis ──▶ D1..D4 ──▶ E (w
 C1 C2 C3  (parallel, hours)  ──▶ gate decision ────────────▶
 ```
 
-B and C need no re-run and can start immediately — they use the committed
-results plus targeted experiments. A1 is the long pole and should be launched
+B and C need no re-run and can start immediately: B runs its own targeted
+experiments, and C computes `avg_lag1` directly from the datasets. Neither
+depends on the stale BigFeat numbers. A1 is the long pole and should be launched
 first so it runs in the background.
+
+Note that C2 correlates `avg_lag1` against a MASE ratio, so its *conclusion*
+must wait for Phase A even though its measurement can be taken now.
 
 ## What would change the conclusion
 
