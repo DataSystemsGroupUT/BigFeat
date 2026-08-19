@@ -51,6 +51,24 @@ ACF(7)=0.652 on the fixture). Fundamental missed in 3 of 5 planted cases.
 **Non-goals:** do not touch `_compute_acf` (the overlap bound from the
 correctness round stays as is).
 
+**Amendments from implementation (2026-08-19):**
+
+1. *Echo rule is ANY-of {2L, 3L}, not all.* In a multi-period signal the
+   other component can sit near anti-phase at exactly 2L and cancel the
+   echo: planted {12, 52} gives ACF(24) = 0.018 (cos(2*pi*24/52) ~ -0.97)
+   while 3L = 36 shows 0.322. Requiring 2L rejects true fundamentals.
+2. *ACF standalone cannot recover the SECOND period, by physics.* The slow
+   fundamental is not an ACF local maximum at all -- the fast component's
+   comb tooth adjacent to it towers over it (28 vs 30; 48/60 vs 52). The
+   lag-domain contract is therefore: shortest fundamental first, harmonics
+   masked, noise spikes rejected. Both-period recovery is the ensemble's
+   job, which REORDERS THE SERIES: Fix 4 (DFT top-k) must land before
+   Fix 2's fixture acceptance can pass, since DFT's single argmax also
+   returns only the stronger component today.
+3. Acceptance tests adjusted accordingly (shortest-first + no-harmonics
+   instead of both-recovered for the standalone ACF tests); the
+   both-periods assertion moves to the Fix-2 end-to-end test.
+
 ---
 
 ## Fix 2 — Period-consensus stage before laddering

@@ -233,3 +233,76 @@ def test_pooled_windows_keep_the_long_scales():
         f"all pooled windows are short ({days}) for monthly data; the long "
         f"scales were truncated away"
     )
+
+
+# ---------------------------------------------------------------------------
+# ACF must recover fundamentals, not harmonics (PIPELINE_FIXES_SPEC.md Fix 1)
+# ---------------------------------------------------------------------------
+
+def _planted(periods, n=1000, seed=0, noise=0.5):
+    rs = np.random.RandomState(seed)
+    t = np.arange(n)
+    sig = sum(10 * np.sin(2 * np.pi * t / p) for p in periods) + rs.randn(n) * noise
+    return sig
+
+
+def _acf_accepted_lags(sig, max_lag=400):
+    det = ACFWindowDetector(verbose=False)
+    acf = det._compute_acf(det._preprocess_signal(sig), max_lag=max_lag)
+    lags, meta = det._find_acf_peaks(acf, min_lag=3)
+    return list(lags), meta
+
+
+def test_acf_returns_the_shortest_fundamental_first_with_no_harmonics():
+    """The shared fixture: planted 7 and 30 days.
+
+    Height-sorted peak picking returned [210, 91, 301] -- common multiples,
+    because ACF at lcm-type lags exceeds the fundamentals (ACF(210)=0.997 vs
+    ACF(7)=0.652). The achievable lag-domain contract is: the SHORTEST
+    fundamental first, and no harmonic junk. The second period (30d) is NOT
+    an ACF local maximum at all -- the 7d comb tooth at 28 towers over it --
+    which is exactly why multi-period recovery is the ensemble's job
+    (DFT/LS propose, ACF verifies; see PIPELINE_FIXES_SPEC Fixes 2 and 4).
+    """
+    sig = _planted([7, 30], n=730)
+    lags, _ = _acf_accepted_lags(sig, max_lag=365)
+    assert lags, "no fundamentals accepted"
+    assert 6 <= lags[0] <= 8, f"first accepted lag {lags[0]} is not the 7d fundamental"
+    assert all(l <= 60 for l in lags), (
+        f"harmonic/multiple lags survived: {[l for l in lags if l > 60]}"
+    )
+
+
+def test_acf_single_period_reports_the_fundamental_not_a_multiple():
+    """Planted [30] alone previously returned 360, 120, 330."""
+    sig = _planted([30])
+    lags, _ = _acf_accepted_lags(sig)
+    assert lags, "no peaks accepted on a clean 30d signal"
+    assert 27 <= lags[0] <= 33, f"top accepted lag {lags[0]} is not the 30d fundamental"
+
+
+def test_acf_recovers_non_multiple_period_pair():
+    """Planted [12, 52] previously returned 156, 312, 360 as its top-3 -- neither
+    fundamental. The shortest must now lead, with its harmonics masked."""
+    sig = _planted([12, 52])
+    lags, _ = _acf_accepted_lags(sig)
+    top3 = lags[:3]          # what detect_optimal_windows actually consumes
+    assert any(10 <= l <= 14 for l in top3), f"12d missing from top-3: {top3}"
+    # 52 itself is displaced by the 12d comb (teeth at 48/60); requiring it
+    # here would overspecify the lag domain. What MUST hold: no multiple of
+    # the accepted fundamental masquerades as a second period.
+    assert not any(l in (24, 36, 48, 60, 72) for l in top3), (
+        f"harmonics of 12 survived as periods: {top3}"
+    )
+
+
+def test_acf_verification_rejects_isolated_noise_spike():
+    """A lone tall spike in the ACF is not a period: a true period repeats at
+    its multiples. The verification step must reject candidates whose 2L
+    neighbourhood shows nothing."""
+    det = ACFWindowDetector(verbose=False)
+    acf = np.zeros(200)
+    acf[0] = 1.0
+    acf[40] = 0.6          # isolated spike, no echo at 80 or 120
+    lags, _ = det._find_acf_peaks(acf, min_lag=3)
+    assert 40 not in list(lags), "isolated spike accepted as a period"

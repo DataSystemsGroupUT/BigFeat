@@ -195,10 +195,63 @@ class ACFWindowDetector(BaseWindowDetector):
         # Get peak heights
         peak_heights = acf_values[peak_lags]
 
-        # Sort by height (strongest correlations first)
-        sorted_indices = np.argsort(peak_heights)[::-1]
-        peak_lags = peak_lags[sorted_indices]
-        peak_heights = peak_heights[sorted_indices]
+        # Accept fundamentals in ASCENDING-lag order, not by height.
+        #
+        # For a signal with periods P and Q the ACF at common multiples
+        # (k*P, k*Q, lcm) is HIGHER than at the fundamentals, because every
+        # component realigns there: on a 7+30-day test signal ACF(210)=0.997
+        # vs ACF(7)=0.652. Sorting by height therefore returned harmonics
+        # (210, 91, 301) and missed both true periods. The fundamental is the
+        # first peak clearing the significance floor, so we walk lags upward,
+        # and after accepting a lag we mask its harmonic train so the next
+        # acceptance is an independent period rather than an echo.
+        #
+        # Each candidate is VERIFIED at its multiples: a true period L echoes
+        # at small multiples of L, an isolated noise spike does not. The echo
+        # is required at ANY of 2L/3L, not all of them -- in a multi-period
+        # signal the OTHER component can sit near anti-phase at exactly 2L
+        # and cancel the echo there (planted {12, 52}: ACF(24) = 0.018
+        # because cos(2*pi*24/52) ~ -0.97, while 3L = 36 shows 0.322).
+        # Verification is skipped when even 2L exceeds the computed range --
+        # nothing to test against -- which is safe because any multiple of an
+        # already-accepted shorter period has been masked by then.
+        max_lag = len(acf_values) - 1
+        order = np.argsort(peak_lags)                 # ascending lag
+        cand_lags = peak_lags[order].astype(int)
+        cand_heights = peak_heights[order].astype(float)
+
+        def _echo_at(mult_lag, min_height):
+            lo = max(min_lag, int(np.floor(mult_lag * 0.85)))
+            hi = min(max_lag, int(np.ceil(mult_lag * 1.15)))
+            if hi <= lo:
+                return False
+            return float(np.nanmax(acf_values[lo:hi + 1])) >= min_height
+
+        accepted, accepted_heights = [], []
+        masked = np.zeros(len(cand_lags), dtype=bool)
+        for i, (lag, height) in enumerate(zip(cand_lags, cand_heights)):
+            if masked[i]:
+                continue
+            multiples_in_range = [m * lag for m in (2, 3) if m * lag <= max_lag]
+            if multiples_in_range and not any(
+                    _echo_at(m, height / 2) for m in multiples_in_range):
+                continue                              # isolated spike: reject
+            accepted.append(int(lag))
+            accepted_heights.append(float(height))
+            # mask this fundamental's harmonic train among later candidates
+            tol = max(2.0, 0.15 * lag)
+            for j in range(i + 1, len(cand_lags)):
+                k = round(cand_lags[j] / lag)
+                if k >= 2 and abs(cand_lags[j] - k * lag) <= tol:
+                    masked[j] = True
+            if len(accepted) >= 3:
+                break
+
+        peak_lags = np.asarray(accepted, dtype=int)
+        peak_heights = np.asarray(accepted_heights, dtype=float)
+
+        if len(peak_lags) == 0:
+            return np.array([]), {'peak_heights': np.array([]), 'n_peaks': 0}
 
         metadata = {
             'peak_heights': peak_heights,
