@@ -75,6 +75,11 @@ and it is underpowered (≤25 series, ≤120 rows, single seed).
 
 ---
 
+> **See also** [BENCHMARK_DESIGN.md](BENCHMARK_DESIGN.md): the Monash suite
+> is univariate with no covariates, so it cannot exercise cross-column
+> composition at all. That document proposes the replacement evaluation;
+> Phase A below should be read as applying to whichever suite is adopted.
+
 ## Phase A — Establish the real baseline (blocking)
 
 Everything else is speculation until this exists.
