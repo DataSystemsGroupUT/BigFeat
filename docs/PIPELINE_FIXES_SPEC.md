@@ -108,6 +108,16 @@ the consensus fundamentals. Delete the quantile subsample of pooled windows
 (the ladder of <=3 fundamentals is already <= n_windows in practice; if it
 exceeds, see Fix 5).
 
+**Amendment from implementation (2026-08-19):** after Fixes 1, 4 and 5
+landed, the fixture's window acceptance ALREADY passes end-to-end
+(`[1,3,5,7,28,41]` -- both periods bracketed, no junk): the pooling
+pollution was cured at its source, garbage-in rather than pooling-rule.
+The full consense_periods machinery is therefore DEFERRED pending a
+measured failure it would fix; what survives of Fix 2 is the
+`last_detected_periods` stash (implemented, used by Fix 3) and the
+end-to-end regression test pinning the window set. Revisit alongside
+R5 calibration if confidence-weighting becomes measurable.
+
 **Interface note:** detectors currently return `(windows, confidence_dict)` —
 the raw periods are internal. Smallest change: have `detect_optimal_windows`
 also stash `self.last_detected_periods` (list of (period, conf)); the

@@ -327,7 +327,10 @@ def test_recipes_record_the_feature_they_consume(periodic_data):
     bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
                     datetime_col="date", ts_operation_weight_multiplier=50.0,
                     verbose=False)
-    bf.fit(X, y, **FIT_KWARGS)
+    # gen_size/iterations above FIT_KWARGS: after Fix 3 the fixture's lags
+    # changed ([1,3,7] -> [1,30,7]) and the small default budget happens to
+    # select no TS operator at all with this seed; a larger draw does.
+    bf.fit(X, y, gen_size=5, iterations=3, random_state=0)
 
     ts_ops = [
         (op, params)
@@ -355,7 +358,7 @@ def test_transform_ignores_current_feature_index(periodic_data):
     bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
                     datetime_col="date", ts_operation_weight_multiplier=50.0,
                     verbose=False)
-    bf.fit(X, y, **FIT_KWARGS)
+    bf.fit(X, y, gen_size=5, iterations=3, random_state=0)
 
     baseline = np.asarray(bf.transform(X), dtype=float)
 

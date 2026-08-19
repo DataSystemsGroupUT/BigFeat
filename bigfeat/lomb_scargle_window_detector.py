@@ -201,6 +201,10 @@ class LombScargleWindowDetector(BaseWindowDetector):
         times = (df_sorted[datetime_col] - df_sorted[datetime_col].iloc[0]).dt.total_seconds().values
 
         detected_periods = []
+
+        _fundamental_pairs = []
+
+        self.last_detected_periods = _fundamental_pairs
         confidence_scores = {}
 
         if self.verbose:
@@ -263,14 +267,16 @@ class LombScargleWindowDetector(BaseWindowDetector):
                                  if self.min_window_days <= p <= self.max_window_days]
 
                 if len(valid_periods) > 0:
-                    # Take top 3 periods per feature
-                    detected_periods.extend(valid_periods[:3])
-
                     # Confidence based on maximum power (normalized)
                     max_power = peak_powers[0] if len(peak_powers) > 0 else 0
                     # Square root for better scaling to [0, 1] range
                     confidence = float(np.sqrt(max_power))
                     confidence_scores[col] = confidence
+
+                    # Take top 3 periods per feature
+                    detected_periods.extend(valid_periods[:3])
+                    for _vp in valid_periods[:3]:
+                        _fundamental_pairs.append((float(_vp), float(confidence)))
 
                     if self.verbose:
                         print(f"  '{col}': detected {len(peaks)} peaks ({n_valid}/{len(series)} valid points)")

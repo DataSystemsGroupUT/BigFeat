@@ -355,3 +355,54 @@ def test_ladder_never_drops_detected_fundamentals():
     days = {w.days for w in windows}
     assert {7, 30, 91} <= days, f"fundamental dropped: kept {sorted(days)}"
     assert len(windows) <= 4
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: ensemble windows and lags on the shared two-period fixture
+# (PIPELINE_FIXES_SPEC.md Fixes 2/3 acceptance)
+# ---------------------------------------------------------------------------
+
+def _fixture_frame():
+    rs = np.random.RandomState(0)
+    n = 730
+    t = np.arange(n)
+    sig = (10 * np.sin(2 * np.pi * t / 7)
+           + 8 * np.sin(2 * np.pi * t / 30) + rs.randn(n) * 0.5)
+    X = pd.DataFrame({
+        "date": pd.date_range("2022-01-01", periods=n, freq="D"),
+        "v": sig, "u": rs.rand(n),
+    })
+    y = pd.Series(np.roll(sig, -1))
+    return X, y
+
+
+def _fit_fixture():
+    bf = bb.BigFeat(task_type="regression", enable_time_series="auto",
+                    datetime_col="date", verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        bf.fit(_fixture_frame()[0], _fixture_frame()[1],
+               gen_size=3, iterations=1, random_state=0)
+    return bf
+
+
+def test_ensemble_windows_bracket_both_planted_periods():
+    """Before Fixes 1/4/5 the pooled set was [1,4,7,14,105,210]: the 30-day
+    period lost entirely, two slots on ACF harmonics. Pins the repair."""
+    bf = _fit_fixture()
+    days = sorted(w.days for w in bf.window_sizes)
+    assert any(6 <= d <= 8 for d in days), f"7d not bracketed: {days}"
+    assert any(26 <= d <= 34 for d in days), f"30d not bracketed: {days}"
+    assert all(d <= 60 for d in days), f"harmonic junk: {[d for d in days if d > 60]}"
+
+
+def test_lag_periods_contain_the_detected_fundamentals():
+    """Fix 3: lags were positional picks from the window ladder
+    (windows[0], windows[1], windows[mid]) -- on this fixture [1, 3, 7],
+    with the 30-day fundamental absent and 7 present only by accident of
+    position. A lag should EQUAL a detected cycle; a window should span one."""
+    bf = _fit_fixture()
+    lag_days = sorted(getattr(l, "days", l) for l in bf.lag_periods)
+    assert 1 in lag_days, f"1-step lag missing: {lag_days}"
+    assert any(6 <= d <= 8 for d in lag_days), f"7d lag missing: {lag_days}"
+    assert any(26 <= d <= 34 for d in lag_days), f"30d lag missing: {lag_days}"

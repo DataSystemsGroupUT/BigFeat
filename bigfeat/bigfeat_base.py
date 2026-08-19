@@ -395,12 +395,18 @@ class BigFeat:
 
             # Set lag periods
             if self.user_provided_lags is None:
-                # Derive from window sizes
-                self.lag_periods = [
-                    self.window_sizes[0],  # Smallest window
-                    self.window_sizes[min(1, len(self.window_sizes) - 1)],
-                    self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
-                ]
+                # Prefer detected fundamentals (Fix 3); positional fallback.
+                _pairs = getattr(self.window_detector,
+                                 'last_detected_periods', []) or []
+                _lags = self._derive_lag_periods_from_fundamentals(_pairs)
+                if _lags is not None:
+                    self.lag_periods = _lags
+                else:
+                    self.lag_periods = [
+                        self.window_sizes[0],  # Smallest window
+                        self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                        self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                    ]
             else:
                 self.lag_periods = self._parse_time_periods(self.user_provided_lags)
 
@@ -626,13 +632,24 @@ class BigFeat:
                     if hasattr(self, 'time_series_operators'): 
                         delattr(self, 'time_series_operators')
 
-                # Set lag periods
+                # Set lag periods from the detected fundamentals (Fix 3),
+                # falling back to the positional rule when no detector
+                # stashed any.
                 if self.user_provided_lags is None:
-                    self.lag_periods = [
-                        self.window_sizes[0],
-                        self.window_sizes[min(1, len(self.window_sizes) - 1)],
-                        self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
-                    ]
+                    _pairs = []
+                    for _dt, _res in detector_results.items():
+                        if _res['is_periodic']:
+                            _pairs.extend(getattr(_res['instance'],
+                                                  'last_detected_periods', []))
+                    _lags = self._derive_lag_periods_from_fundamentals(_pairs)
+                    if _lags is not None:
+                        self.lag_periods = _lags
+                    else:
+                        self.lag_periods = [
+                            self.window_sizes[0],
+                            self.window_sizes[min(1, len(self.window_sizes) - 1)],
+                            self.window_sizes[min(len(self.window_sizes) // 2, len(self.window_sizes) - 1)]
+                        ]
                 else:
                     self.lag_periods = self._parse_time_periods(self.user_provided_lags)
 
@@ -1920,6 +1937,47 @@ class BigFeat:
             if 0 <= feature_index < len(self.feature_columns):
                 return self.feature_columns[feature_index]
         return f'feature_{feature_index}'
+
+    @staticmethod
+    def _derive_lag_periods_from_fundamentals(pairs, max_lags=2):
+        """Lag periods from detected fundamentals (PIPELINE_FIXES_SPEC Fix 3).
+
+        pairs: list of (period_days, confidence) stashed by the detectors.
+        Returns [Timedelta(1d), P1, P2, ...] or None when nothing was
+        detected (caller falls back to the positional rule).
+
+        A lag should EQUAL a detected cycle -- "same point one cycle ago" --
+        where a window merely spans one. The previous positional derivation
+        (windows[0], windows[1], windows[mid]) handed generation lags [1,3,7]
+        on a 7+30-day signal: the 30-day fundamental absent, and 7 present
+        only by accident of its position in the pooled ladder.
+
+        Clustering: greedy, +-15% relative, confidence-weighted mean per
+        cluster, clusters ranked by summed confidence so a period seen by
+        several detectors outranks a single detector's stray peak.
+        """
+        clusters = []          # each: [weighted_period_sum, weight]
+        for period, conf in sorted(pairs, key=lambda x: -x[1]):
+            if period <= 0 or conf <= 0:
+                continue
+            for c in clusters:
+                centre = c[0] / c[1]
+                if abs(period - centre) <= 0.15 * max(period, centre):
+                    c[0] += period * conf
+                    c[1] += conf
+                    break
+            else:
+                clusters.append([period * conf, conf])
+        if not clusters:
+            return None
+        clusters.sort(key=lambda c: -c[1])
+        lags = [pd.Timedelta(days=1)]
+        for c in clusters[:max_lags]:
+            days = max(1, int(round(c[0] / c[1])))
+            td = pd.Timedelta(days=days)
+            if td not in lags:
+                lags.append(td)
+        return lags
 
     def _reset_fit_state(self):
         """Clear state carried over from any previous fit() on this object.

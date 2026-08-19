@@ -235,6 +235,12 @@ class DFTWindowDetector(BaseWindowDetector):
         if datetime_col not in df.columns:
             raise ValueError(f"Datetime column '{datetime_col}' not found in DataFrame")
 
+        # Raw fundamentals with confidences, stashed for the caller (Fix 3):
+        # the ensemble derives LAG periods from these -- a lag should EQUAL a
+        # detected cycle, where a window merely spans one.
+        _fundamental_pairs = []
+        self.last_detected_periods = _fundamental_pairs
+
         if self.verbose:
              print(f"DEBUG DFT: Input shape: {df.shape}, Groupby: {groupby_cols}")
              if groupby_cols is not None and len(groupby_cols) > 0:
@@ -299,6 +305,7 @@ class DFTWindowDetector(BaseWindowDetector):
                                  period_days = self.max_window_days
 
                              all_detected_periods.append(period_days)
+                             _fundamental_pairs.append((float(period_days), float(conf)))
 
                 # 3. Average the confidence scores
                 final_confidence_scores = {
@@ -350,6 +357,7 @@ class DFTWindowDetector(BaseWindowDetector):
 
                 # Top-k spectral peaks (Fix 4; see _top_spectral_periods)
                 first_period_days = None
+                _conf_here = self._compute_confidence(magnitudes)
                 for period_val in self._top_spectral_periods(magnitudes, periods):
                     period_days = self._convert_to_days(period_val, sampling_rate)
 
@@ -359,6 +367,7 @@ class DFTWindowDetector(BaseWindowDetector):
                         period_days = self.max_window_days
 
                     detected_periods.append(period_days)
+                    _fundamental_pairs.append((float(period_days), float(_conf_here)))
                     if first_period_days is None:
                         first_period_days = period_days
                 period_days = first_period_days if first_period_days is not None \

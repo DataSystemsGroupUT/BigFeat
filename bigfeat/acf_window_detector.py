@@ -309,6 +309,10 @@ class ACFWindowDetector(BaseWindowDetector):
         df_sorted = df.sort_values(datetime_col).reset_index(drop=True)
 
         detected_periods = []
+
+        _fundamental_pairs = []
+
+        self.last_detected_periods = _fundamental_pairs
         confidence_scores = {}
 
         if self.verbose:
@@ -365,6 +369,9 @@ class ACFWindowDetector(BaseWindowDetector):
                 if len(valid_periods) > 0:
                     # Take top 3 periods per feature
                     detected_periods.extend(valid_periods[:3])
+                    for _vp, _vh in zip(valid_periods[:3],
+                                        peak_metadata['peak_heights'][:3]):
+                        _fundamental_pairs.append((float(_vp), float(_vh)))
 
                     # Confidence based on strongest peak height
                     max_peak_height = peak_metadata['peak_heights'][0] if len(peak_metadata['peak_heights']) > 0 else 0
