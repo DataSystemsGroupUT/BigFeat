@@ -113,7 +113,11 @@ landed, the fixture's window acceptance ALREADY passes end-to-end
 (`[1,3,5,7,28,41]` -- both periods bracketed, no junk): the pooling
 pollution was cured at its source, garbage-in rather than pooling-rule.
 The full consense_periods machinery is therefore DEFERRED pending a
-measured failure it would fix; what survives of Fix 2 is the
+measured failure it would fix; **update 2026-08-19 (later): the synthetic
+study (docs/SYNTHETIC_STUDY.md, gap 1) has now measured exactly such a
+failure -- the pooled-window quantile subsample drops fundamentals that
+detection recovered (6/78 cases). The deferral is lifted for the narrow
+slice that protects fundamentals in the pooled path;** what survives of Fix 2 is the
 `last_detected_periods` stash (implemented, used by Fix 3) and the
 end-to-end regression test pinning the window set. Revisit alongside
 R5 calibration if confidence-weighting becomes measurable.
