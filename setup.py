@@ -22,5 +22,8 @@ setup(
     ],
     extras_require={
         'test': ['pytest'],
+        # ADF-based stationarity gate; without it BigFeat falls back to a
+        # lag-1 autocorrelation heuristic (see docs/PIPELINE_STAGE_REVIEW.md)
+        'stationarity': ['statsmodels'],
     },
 )

@@ -457,22 +457,14 @@ class BigFeat:
                 else:
                     df = pd.DataFrame(X)
 
-                check_cols = feature_cols[:5] # Check a wider sample
-                lag1_corrs = []
-                for col in check_cols:
-                    if col in df.columns:
-                        series = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                        corr = abs(series.autocorr(lag=1))
-                        if not np.isnan(corr): lag1_corrs.append(corr)
+                is_highly_non_stationary, _stat_diag = \
+                    self._assess_stationarity(df, feature_cols)
+                avg_lag1 = self.avg_lag1
 
-                avg_lag1 = np.mean(lag1_corrs) if lag1_corrs else 0.0
-                self.avg_lag1 = avg_lag1 # Store as class attribute for benchmarking
-                # FIX: Enforce scalar types
-                if hasattr(avg_lag1, 'item'): avg_lag1 = avg_lag1.item()
-                is_highly_non_stationary = avg_lag1 > 0.85  # Very strong trend/random walk
-                
                 if self.verbose and is_highly_non_stationary:
-                    print(f"  ⚠ High Non-Stationarity detected (Avg Lag-1 Corr: {avg_lag1:.3f})")
+                    print(f"  ⚠ Non-Stationarity detected "
+                          f"({_stat_diag['method']}: "
+                          f"{_stat_diag.get('p_median', _stat_diag['avg_lag1']):.3f})")
 
             except Exception as e:
                 is_highly_non_stationary = False
@@ -664,7 +656,7 @@ class BigFeat:
                 if self.verbose: print("  → No strong periodicity consensus.")
                 
                 # Use the pre-calculated avg_lag1
-                if is_highly_non_stationary or avg_lag1 > 0.8:  # Keep 0.8 threshold for non-periodic enabled fallback
+                if is_highly_non_stationary:  # ADF verdict; the old lag1>0.8 secondary was the same smoothness proxy
                     if self.verbose: 
                         print(f"  ⚠ Non-periodic but STRONG TREND detected (avg lag-1 corr={avg_lag1:.2f}).")
                         print(f"  → Prioritizing stationarity operators (diff, pct_change).")
@@ -1937,6 +1929,66 @@ class BigFeat:
             if 0 <= feature_index < len(self.feature_columns):
                 return self.feature_columns[feature_index]
         return f'feature_{feature_index}'
+
+    def _assess_stationarity(self, df, feature_cols):
+        """Decide whether the data is strongly non-stationary.
+
+        Returns (is_non_stationary, diagnostics_dict) and sets
+        self.avg_lag1 / self.stationarity_diagnostics.
+
+        The previous gate was `mean |lag-1 autocorr| > 0.85`, which measures
+        SMOOTHNESS, not non-stationarity, and misclassified in both
+        directions (PIPELINE_STAGE_REVIEW.md section 2):
+
+        * a clean stationary 30-day seasonal has lag-1 ~ 0.97 -- the gate
+          fired and stripped rolling/seasonal operators from exactly the
+          data this subsystem exists for;
+        * a random walk observed with measurement noise has lag-1 well
+          under 0.85 (covid_deaths: 0.725) -- the gate waved it through to
+          the full pool, where a smoothing operator was selected on
+          trending data at a 5x MASE cost.
+
+        An Augmented Dickey-Fuller test classifies all measured cases
+        correctly: fail-to-reject the unit root (median p > 0.05 across
+        sampled columns) means non-stationary. statsmodels is an optional
+        dependency; without it the old heuristic remains as fallback.
+        """
+        check_cols = [c for c in feature_cols[:5] if c in df.columns]
+
+        # Always compute the legacy statistic: it is exposed as a public
+        # attribute, used by the benchmark harness, and is the fallback.
+        lag1_corrs = []
+        for col in check_cols:
+            series = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            corr = abs(series.autocorr(lag=1))
+            if not np.isnan(corr):
+                lag1_corrs.append(float(corr))
+        avg_lag1 = float(np.mean(lag1_corrs)) if lag1_corrs else 0.0
+        self.avg_lag1 = avg_lag1
+
+        try:
+            from statsmodels.tsa.stattools import adfuller
+            pvals = []
+            for col in check_cols:
+                series = pd.to_numeric(df[col], errors='coerce').dropna().values
+                if len(series) < 20 or np.std(series) < 1e-10:
+                    continue
+                try:
+                    pvals.append(float(adfuller(series)[1]))
+                except Exception:
+                    continue
+            if pvals:
+                p_median = float(np.median(pvals))
+                diag = {'method': 'adf', 'p_median': p_median,
+                        'n_cols_tested': len(pvals), 'avg_lag1': avg_lag1}
+                self.stationarity_diagnostics = diag
+                return p_median > 0.05, diag
+        except ImportError:
+            pass
+
+        diag = {'method': 'lag1_fallback', 'avg_lag1': avg_lag1}
+        self.stationarity_diagnostics = diag
+        return avg_lag1 > 0.85, diag
 
     @staticmethod
     def _derive_lag_periods_from_fundamentals(pairs, max_lags=2):

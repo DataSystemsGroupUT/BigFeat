@@ -182,6 +182,12 @@ Rolling operations never cross an entity boundary when `groupby_cols` is set,
 and all operators are causal — a row's features depend only on rows dated at or
 before it.
 
+Strongly non-stationary data (unit-root/trending series) is detected with an
+Augmented Dickey–Fuller test and routed to a restricted operator set, since
+rolling means on a trending series describe the trend rather than the signal.
+This needs `statsmodels` (`pip install bigfeat[stationarity]`); without it a
+lag-1 autocorrelation heuristic is used instead.
+
 ### Key time-series parameters
 
 | Parameter | Default | Meaning |

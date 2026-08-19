@@ -406,3 +406,76 @@ def test_lag_periods_contain_the_detected_fundamentals():
     assert 1 in lag_days, f"1-step lag missing: {lag_days}"
     assert any(6 <= d <= 8 for d in lag_days), f"7d lag missing: {lag_days}"
     assert any(26 <= d <= 34 for d in lag_days), f"30d lag missing: {lag_days}"
+
+
+# ---------------------------------------------------------------------------
+# Stationarity gate must measure stationarity, not smoothness
+# (PIPELINE_STAGE_REVIEW.md section 2)
+# ---------------------------------------------------------------------------
+
+def _fit_auto(X, y):
+    bf = bb.BigFeat(task_type="regression", enable_time_series="auto",
+                    datetime_col="date", verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        bf.fit(X, y, gen_size=2, iterations=1, random_state=0)
+    return bf
+
+
+def _restricted(bf):
+    ops = getattr(bf, "time_series_operators", None)
+    return ops is not None and len(ops) <= 3
+
+
+def test_smooth_stationary_seasonal_keeps_the_full_operator_pool():
+    """A clean 30-day seasonal is STATIONARY, but its smoothness gives it
+    lag-1 autocorrelation ~0.97 -- above the old 0.85 gate, which therefore
+    stripped rolling/seasonal operators from exactly the data this subsystem
+    exists for. ADF classifies it correctly (p ~ 0.000)."""
+    rs = np.random.RandomState(0)
+    n = 400
+    t = np.arange(n)
+    X = pd.DataFrame({
+        "date": pd.date_range("2021-01-01", periods=n, freq="D"),
+        "a": 10 * np.sin(2 * np.pi * t / 30) + rs.randn(n) * 0.5,
+        "b": 8 * np.sin(2 * np.pi * t / 30 + 1.0) + rs.randn(n) * 0.5,
+    })
+    # guard: the fixture really is the old gate's false-positive case
+    lag1 = float(np.mean([abs(X[c].autocorr(1)) for c in ("a", "b")]))
+    assert lag1 > 0.85, f"fixture drift: lag1={lag1:.3f} no longer trips the old gate"
+
+    y = pd.Series(X["a"].values * 1.5 + rs.randn(n) * 0.3)
+    bf = _fit_auto(X, y)
+    assert bf.enable_time_series, "periodic fixture must enable time series"
+    assert not _restricted(bf), (
+        "stationary seasonal data was routed to restricted mode: the gate is "
+        "measuring smoothness, not stationarity"
+    )
+
+
+def test_unit_root_below_the_lag1_radar_is_still_restricted():
+    """A random walk observed with measurement noise has lag-1 autocorrelation
+    BELOW 0.85 (the old gate waves it through to full mode) while ADF still
+    shows a clear unit root -- the covid_deaths failure mode, where a
+    smoothing operator was selected on trending data and cost 5x in MASE."""
+    rs = np.random.RandomState(2)
+    n = 400
+    t = np.arange(n)
+    cols = {}
+    for i, k in enumerate((3.0, 3.2, 3.4)):
+        walk = np.cumsum(rs.randn(n))
+        cols[f"c{i}"] = walk + rs.randn(n) * k + 2 * np.sin(2 * np.pi * t / 7)
+    X = pd.DataFrame({"date": pd.date_range("2021-01-01", periods=n, freq="D"),
+                      **cols})
+    lag1 = float(np.mean([abs(X[c].autocorr(1)) for c in cols]))
+    assert lag1 < 0.85, f"fixture drift: lag1={lag1:.3f} would trip the old gate anyway"
+
+    y = pd.Series(X["c0"].values + rs.randn(n) * 0.3)
+    bf = _fit_auto(X, y)
+    if not bf.enable_time_series:
+        pytest.skip("detectors declined this fixture entirely; gate untested")
+    assert _restricted(bf), (
+        f"unit-root data (avg lag1={lag1:.3f}, under the old 0.85 radar) "
+        f"reached the FULL operator pool; rolling/smoothing operators will "
+        f"describe the trend, not the signal"
+    )
