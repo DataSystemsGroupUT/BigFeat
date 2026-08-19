@@ -144,23 +144,35 @@ class BaseWindowDetector:
         if not detected_periods:
             return self._get_default_windows()
 
-        candidates = set()
+        fundamentals = set()
+        derived = set()
         for period in detected_periods:
             if period <= 0:
                 continue
-            candidates.add(period)
+            fundamentals.add(period)
             if period >= 4:
-                candidates.add(period / 2)
+                derived.add(period / 2)
             if period <= self.max_window_days // 4:
-                candidates.add(period * 2)
-                candidates.add(period * 4)
+                derived.add(period * 2)
+                derived.add(period * 4)
 
-        valid = sorted({int(round(p)) for p in candidates
-                        if self.min_window_days <= p <= self.max_window_days})
-        if not valid:
+        in_bounds = lambda p: self.min_window_days <= p <= self.max_window_days
+        fund = sorted({int(round(p)) for p in fundamentals if in_bounds(p)})
+        deriv = sorted({int(round(p)) for p in derived
+                        if in_bounds(p)} - set(fund))
+        if not fund and not deriv:
             return self._get_default_windows()
 
-        return [pd.Timedelta(days=d) for d in valid[:self.n_windows]]
+        # Fundamentals are non-droppable (Fix 5). The previous ascending
+        # truncation `sorted(all)[:n_windows]` silently dropped DETECTED
+        # periods in favour of derived sub-harmonics: with detected
+        # {8, 11, 30} the ladder is [4,5,8,11,15,16,22,30,...] and slot six
+        # cuts before 30 -- the genuine second period lost to its own
+        # ladder's small change. Detected periods fill slots first; derived
+        # harmonics take whatever room remains, shortest first.
+        keep = fund[:self.n_windows]
+        keep += deriv[:max(0, self.n_windows - len(keep))]
+        return [pd.Timedelta(days=d) for d in sorted(keep)]
 
     def infer_sampling_rate(self, df, datetime_col, groupby_cols=None) -> str:
         """Infer a pandas frequency alias from the data's own timestamps.

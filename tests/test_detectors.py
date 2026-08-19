@@ -306,3 +306,52 @@ def test_acf_verification_rejects_isolated_noise_spike():
     acf[40] = 0.6          # isolated spike, no echo at 80 or 120
     lags, _ = det._find_acf_peaks(acf, min_lag=3)
     assert 40 not in list(lags), "isolated spike accepted as a period"
+
+
+# ---------------------------------------------------------------------------
+# DFT must propose ALL strong spectral peaks (PIPELINE_FIXES_SPEC.md Fix 4)
+# ---------------------------------------------------------------------------
+
+def test_dft_recovers_non_multiple_period_pair():
+    """Planted [11, 31], amplitudes 10 and 7.
+
+    Chosen so neither period's harmonic ladder ({P/2, 2P, 4P}) lands inside
+    the other's tolerance window -- 11 -> {5.5, 22, 44}, 31 -> {15.5, 62,
+    124} -- so the ladder cannot fake the recovery (an earlier draft used
+    [11, 45] and passed on unfixed code because 4*11 = 44 sat inside the
+    45-day window). A single argmax returns only the stronger 11d component;
+    top-k spectral peaks must recover the 31d one as well."""
+    rs = np.random.RandomState(0)
+    n = 1000
+    t = np.arange(n)
+    sig = (10 * np.sin(2 * np.pi * t / 11)
+           + 7 * np.sin(2 * np.pi * t / 31) + rs.randn(n) * 0.5)
+    df = pd.DataFrame({
+        "date": pd.date_range("2020-01-01", periods=n, freq="D"),
+        "v": sig,
+    })
+    det = DFTWindowDetector(verbose=False)
+    windows, conf = det.detect_optimal_windows(df, "date", ["v"], sampling_rate="D")
+    days = sorted(w.days for w in windows)
+    assert any(9 <= d <= 13 for d in days), f"11d missing: {days}"
+    assert any(27 <= d <= 36 for d in days), f"31d missing: {days}"
+
+
+def test_dft_multi_peak_does_not_regress_noise_rejection():
+    """Top-k must not turn noise bins into detections: white noise still
+    yields no periodicity verdict."""
+    det = DFTWindowDetector(verbose=False)
+    is_p, confv, _ = det.assess_periodicity(_frame("noise"), "date", FEATURE_COLS)
+    assert not is_p, f"noise detected as periodic at conf {confv:.3f}"
+
+
+def test_ladder_never_drops_detected_fundamentals():
+    """Fix 5: truncation to n_windows removes derived harmonics, never the
+    detected periods themselves. Ascending truncation previously cut the
+    ladder [4,5,8,11,15,16,22,30,...] at slot six, losing detected 30 to
+    derived 4 and 5."""
+    det = DFTWindowDetector(verbose=False, n_windows=4)
+    windows = det._generate_multiscale_windows([7.0, 30.0, 91.0])
+    days = {w.days for w in windows}
+    assert {7, 30, 91} <= days, f"fundamental dropped: kept {sorted(days)}"
+    assert len(windows) <= 4

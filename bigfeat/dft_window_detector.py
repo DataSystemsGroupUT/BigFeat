@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.fft import fft, fftfreq
+from scipy.signal import find_peaks
 from typing import List, Tuple, Dict, Optional, Union
 import warnings
 
@@ -110,6 +111,47 @@ class DFTWindowDetector(BaseWindowDetector):
         periods = np.where(freq_pos > 0, 1.0 / freq_pos, 0)
 
         return freq_pos, mag_pos, periods
+
+    def _top_spectral_periods(self, magnitudes: np.ndarray,
+                              periods: np.ndarray, k: int = 3) -> list:
+        """Periods (in samples) of the top-k spectral peaks above the noise floor.
+
+        Replaces a single np.argmax. Height-sorting is CORRECT here, unlike in
+        the lag domain (see acf_window_detector._find_acf_peaks): in the
+        frequency domain a fundamental is STRONGER than its harmonics, whereas
+        in the lag domain common multiples of several periods exceed the
+        fundamentals. The floor of 3x the spectrum median mirrors the
+        peak-to-background logic of _compute_confidence -- the median estimates
+        the noise floor because only a handful of bins carry real signal.
+        """
+        if len(magnitudes) == 0 or len(periods) == 0:
+            return []
+        floor = 3.0 * float(np.median(magnitudes))
+        peak_idx, _ = find_peaks(magnitudes, height=max(floor, 1e-12))
+        if len(peak_idx) == 0:
+            # No structured peak; fall back to the single dominant bin so the
+            # caller's behaviour on borderline signals is unchanged.
+            peak_idx = np.array([int(np.argmax(magnitudes))])
+
+        # Deduplicate in PERIOD space before taking top-k. When the true
+        # frequency falls between FFT bins, spectral leakage splits one peak
+        # across adjacent bins -- on a 1000-sample series with an 11-day
+        # period, the three tallest bins are all lobes of the SAME peak
+        # (periods ~10.9/11.1/11.2), and a genuine second period never makes
+        # the cut. Keep only the tallest bin within each +-15% period
+        # neighbourhood, then take the k tallest distinct peaks.
+        by_height = peak_idx[np.argsort(magnitudes[peak_idx])[::-1]]
+        chosen = []
+        for i in by_height:
+            p_i = float(periods[i])
+            if p_i <= 0:
+                continue
+            if any(abs(p_i - c) <= 0.15 * max(p_i, c) for c in chosen):
+                continue
+            chosen.append(p_i)
+            if len(chosen) >= k:
+                break
+        return chosen
 
     def _compute_confidence(self, magnitudes: np.ndarray) -> float:
         """
@@ -245,18 +287,17 @@ class DFTWindowDetector(BaseWindowDetector):
                             total_confidence_scores[col] = []
                         total_confidence_scores[col].append(conf)
                         
-                        # Get Period
-                        dom_idx = np.argmax(mags)
-                        # Avoid index error if periods is empty/all zero
-                        if len(periods) > 0:
-                             period_val = periods[dom_idx]
+                        # Get top-k spectral periods (Fix 4: a single argmax
+                        # returned only the strongest component, so a second
+                        # genuine period was never proposed)
+                        for period_val in self._top_spectral_periods(mags, periods):
                              period_days = self._convert_to_days(period_val, sampling_rate)
-                             
+
                              if period_days < self.min_window_days:
                                  period_days = self.min_window_days
                              elif period_days > self.max_window_days:
                                  period_days = self.max_window_days
-                                 
+
                              all_detected_periods.append(period_days)
 
                 # 3. Average the confidence scores
@@ -307,19 +348,21 @@ class DFTWindowDetector(BaseWindowDetector):
                 # Compute DFT
                 frequencies, magnitudes, periods = self._compute_dft(processed_signal)
 
-                # Find dominant frequency
-                dominant_idx = np.argmax(magnitudes)
-                dominant_period = periods[dominant_idx]
+                # Top-k spectral peaks (Fix 4; see _top_spectral_periods)
+                first_period_days = None
+                for period_val in self._top_spectral_periods(magnitudes, periods):
+                    period_days = self._convert_to_days(period_val, sampling_rate)
 
-                # Apply constraints (convert to days based on sampling rate)
-                period_days = self._convert_to_days(dominant_period, sampling_rate)
+                    if period_days < self.min_window_days:
+                        period_days = self.min_window_days
+                    elif period_days > self.max_window_days:
+                        period_days = self.max_window_days
 
-                if period_days < self.min_window_days:
-                    period_days = self.min_window_days
-                elif period_days > self.max_window_days:
-                    period_days = self.max_window_days
-
-                detected_periods.append(period_days)
+                    detected_periods.append(period_days)
+                    if first_period_days is None:
+                        first_period_days = period_days
+                period_days = first_period_days if first_period_days is not None \
+                    else self.min_window_days
 
                 # Compute confidence
                 confidence = self._compute_confidence(magnitudes)
