@@ -401,9 +401,13 @@ class BigFeat:
                 self.detected_fundamentals = [
                     pd.Timedelta(days=d)
                     for d in self._consense_fundamental_days(_pairs)
+                    if self.min_window_days <= d <= self.max_window_days
                 ]
-                _lags = self._derive_lag_periods_from_fundamentals(_pairs)
-                if _lags is not None:
+                if self.detected_fundamentals:
+                    _lags = [pd.Timedelta(days=1)]
+                    for _f in self.detected_fundamentals:
+                        if _f not in _lags:
+                            _lags.append(_f)
                     self.lag_periods = _lags
                 else:
                     self.lag_periods = [
@@ -595,29 +599,44 @@ class BigFeat:
                 self.avg_consensus_confidence = total_conf / max(1, valid_detectors_count)
                 
                 # Process pooled windows: Remove duplicates and limit to n_windows
+                # Consense the raw detected fundamentals FIRST: they are
+                # consumed by the window pool (protected below), the lag
+                # derivation and the cyclical encodings, so one list feeds
+                # all three (docs/SYNTHETIC_STUDY.md, gaps 1 and 2).
+                _pairs_pool = []
+                for _dt, _res in detector_results.items():
+                    if _res['is_periodic']:
+                        _pairs_pool.extend(getattr(_res['instance'],
+                                                   'last_detected_periods', []))
+                self.detected_fundamentals = [
+                    pd.Timedelta(days=d)
+                    for d in self._consense_fundamental_days(_pairs_pool)
+                    if self.min_window_days <= d <= self.max_window_days
+                ]
+
                 if all_candidate_windows:
                     unique_windows = sorted(set(all_candidate_windows))
 
                     # Keep a spread across the detected scale range rather than
-                    # the n smallest.
-                    #
-                    # This used to be `sorted(...)[:n_windows]`, which truncates
-                    # an ascending list and therefore always discards the LARGE
-                    # windows. Pooling three detectors reliably produces more
-                    # than n_windows candidates, so the long-range windows were
-                    # dropped every time. On the Monash monthly data that left
-                    # windows of 1-6 DAYS for series sampled once a month --
-                    # every rolling feature collapsed to a single observation.
-                    #
-                    # Sampling at even quantiles keeps the shortest and longest
-                    # detected scales plus a spread between them.
-                    if len(unique_windows) > self.n_windows:
-                        idx = np.linspace(0, len(unique_windows) - 1,
-                                          self.n_windows).round().astype(int)
-                        self.window_sizes = [unique_windows[i] for i in sorted(set(idx))]
+                    # the n smallest (see 86f5a79), and NEVER at the expense of
+                    # a detected fundamental: the synthetic study measured 6/78
+                    # cases where a fundamental survived detection (the lags
+                    # proved it) but this quantile subsample dropped it --
+                    # single_30 at 10 cycles yielded windows [1,3,5,20,59,120]
+                    # with 30 absent. Fundamentals fill slots first, exactly as
+                    # the ladder does since Fix 5; the quantile spread fills
+                    # whatever room remains.
+                    protected = sorted(set(self.detected_fundamentals))[:self.n_windows]
+                    remaining = [w for w in unique_windows
+                                 if w not in set(protected)]
+                    room = self.n_windows - len(protected)
+                    if room > 0 and len(remaining) > room:
+                        idx = np.linspace(0, len(remaining) - 1,
+                                          room).round().astype(int)
+                        fill = [remaining[i] for i in sorted(set(idx))]
                     else:
-                        self.window_sizes = unique_windows
-
+                        fill = remaining[:max(0, room)]
+                    self.window_sizes = sorted(set(protected + fill))
 
                     self.detection_strategy = "pooled_ensemble"
                     self.window_detector_type = "ensemble"
@@ -655,17 +674,16 @@ class BigFeat:
                 # falling back to the positional rule when no detector
                 # stashed any.
                 if self.user_provided_lags is None:
-                    _pairs = []
-                    for _dt, _res in detector_results.items():
-                        if _res['is_periodic']:
-                            _pairs.extend(getattr(_res['instance'],
-                                                  'last_detected_periods', []))
-                    self.detected_fundamentals = [
-                        pd.Timedelta(days=d)
-                        for d in self._consense_fundamental_days(_pairs)
-                    ]
-                    _lags = self._derive_lag_periods_from_fundamentals(_pairs)
-                    if _lags is not None:
+                    # One consensus, three consumers: lags come from the same
+                    # protected fundamentals list as the windows (max 3, not a
+                    # re-clustered top-2 -- the study's gap 2: with two true
+                    # periods plus harmonic residue, the second fundamental
+                    # ranked third and pair lags recovered only 6/24).
+                    if self.detected_fundamentals:
+                        _lags = [pd.Timedelta(days=1)]
+                        for _f in self.detected_fundamentals:
+                            if _f not in _lags:
+                                _lags.append(_f)
                         self.lag_periods = _lags
                     else:
                         self.lag_periods = [
@@ -2050,34 +2068,6 @@ class BigFeat:
             if d not in out:
                 out.append(d)
         return out
-
-    @staticmethod
-    def _derive_lag_periods_from_fundamentals(pairs, max_lags=2):
-        """Lag periods from detected fundamentals (PIPELINE_FIXES_SPEC Fix 3).
-
-        pairs: list of (period_days, confidence) stashed by the detectors.
-        Returns [Timedelta(1d), P1, P2, ...] or None when nothing was
-        detected (caller falls back to the positional rule).
-
-        A lag should EQUAL a detected cycle -- "same point one cycle ago" --
-        where a window merely spans one. The previous positional derivation
-        (windows[0], windows[1], windows[mid]) handed generation lags [1,3,7]
-        on a 7+30-day signal: the 30-day fundamental absent, and 7 present
-        only by accident of its position in the pooled ladder.
-
-        Clustering: greedy, +-15% relative, confidence-weighted mean per
-        cluster, clusters ranked by summed confidence so a period seen by
-        several detectors outranks a single detector's stray peak.
-        """
-        days = BigFeat._consense_fundamental_days(pairs, max_k=max_lags)
-        if not days:
-            return None
-        lags = [pd.Timedelta(days=1)]
-        for d in days:
-            td = pd.Timedelta(days=d)
-            if td not in lags:
-                lags.append(td)
-        return lags
 
     def _reset_fit_state(self):
         """Clear state carried over from any previous fit() on this object.

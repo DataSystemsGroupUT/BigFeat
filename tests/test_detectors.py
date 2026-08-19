@@ -583,3 +583,51 @@ def test_detected_fundamentals_are_stored_for_downstream_consumers():
     days = sorted(getattr(f, "days", f) for f in fund)
     assert any(6 <= d <= 8 for d in days), f"7d fundamental missing: {days}"
     assert any(26 <= d <= 34 for d in days), f"30d fundamental missing: {days}"
+
+
+# ---------------------------------------------------------------------------
+# Gaps measured by the synthetic study (docs/SYNTHETIC_STUDY.md)
+# ---------------------------------------------------------------------------
+
+def _study_case(planted, amps, noise, cycles, seed):
+    rs = np.random.RandomState(seed)
+    n = max(60, int(max(planted) * cycles))
+    t = np.arange(n)
+    sig = sum(a * np.sin(2 * np.pi * t / p) for p, a in zip(planted, amps))
+    sig = sig + rs.randn(n) * noise
+    X = pd.DataFrame({"date": pd.date_range("2021-01-01", periods=n, freq="D"),
+                      "v": sig, "u": rs.rand(n)})
+    y = pd.Series(np.roll(sig, -1))
+    bf = bb.BigFeat(task_type="regression", enable_time_series="auto",
+                    datetime_col="date", verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        bf.fit(X, y, gen_size=2, iterations=1, random_state=0)
+    return bf
+
+
+def test_pooled_windows_never_drop_a_detected_fundamental():
+    """Study gap 1: single_30 / high SNR / 10 cycles / seed 0 produced
+    windows [1,3,5,20,59,120] while the LAGS correctly contained 30 -- the
+    fundamental survived detection but the pooled-window quantile subsample
+    dropped it. The pooled path needs the same fundamental protection the
+    ladder got in Fix 5."""
+    bf = _study_case([30], [10], 0.5, 10, 0)
+    assert bf.enable_time_series
+    days = sorted(w.days for w in bf.window_sizes)
+    assert any(abs(d - 30) <= 4.5 for d in days), (
+        f"detected 30d fundamental missing from pooled windows {days} "
+        f"(lags were {[getattr(l,'days',l) for l in bf.lag_periods]})"
+    )
+
+
+def test_pair_lags_hold_both_fundamentals():
+    """Study gap 2: pair lags recovered only 6/24 -- e.g. pair_7_30 / high
+    SNR / 10 cycles / seed 0 gave lags [1, 7] with 30 absent, because the lag
+    list re-clustered to top-2 instead of consuming the protected
+    3-fundamental list the windows use."""
+    bf = _study_case([7, 30], [10, 8], 0.5, 10, 0)
+    assert bf.enable_time_series
+    lag_days = sorted(getattr(l, "days", l) for l in bf.lag_periods)
+    assert any(6 <= d <= 8 for d in lag_days), f"7d lag missing: {lag_days}"
+    assert any(abs(d - 30) <= 4.5 for d in lag_days), f"30d lag missing: {lag_days}"

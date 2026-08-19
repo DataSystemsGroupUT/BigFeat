@@ -14,14 +14,26 @@ Harness: `testing/Benchmarking/synthetic_study.py`. Raw results:
 
 ## Headline
 
-| Metric | PRE | POST |
-|---|---|---|
-| Windows recover ALL planted periods | 54/78 (69%) | **72/78 (92%)** |
-| Lags contain ALL planted periods | 36/78 (46%) | **60/78 (77%)** |
-| TS enabled on planted signals | 77/78 | 78/78 |
-| **False positives on pure noise** | **0/6** | **0/6** |
+| Metric | PRE | POST (fix series) | POST (+ gap fixes) |
+|---|---|---|---|
+| Windows recover ALL planted periods | 54/78 (69%) | 72/78 (92%) | **78/78 (100%)** |
+| Lags contain ALL planted periods | 36/78 (46%) | 60/78 (77%) | **78/78 (100%)** |
+| TS enabled on planted signals | 77/78 | 78/78 | 78/78 |
+| **False positives on pure noise** | **0/6** | **0/6** | **0/6** |
 
-The improvement is not bought with sensitivity: noise rejection is unchanged.
+The improvement is not bought with sensitivity: noise rejection is unchanged
+at every stage. The third column is the study doing its job as an acceptance
+harness -- both gaps it exposed were closed the same day
+(`benchmark_results_synthetic/post_gapfix.json`): fundamentals are now
+protected through the pooled-window subsample exactly as the ladder protects
+them (Fix 5, one level up), and the lag list consumes the same protected
+3-fundamental consensus as the windows and the cyclical encodings -- one
+detection output, three consumers, no re-clustering.
+
+A perfect score on a synthetic grid is a statement about THIS grid (regular
+sampling, sinusoidal components, ±15% tolerance), not about detection in
+general -- the grid should now be extended (irregular sampling, non-sinusoidal
+shapes, amplitude drift) rather than celebrated.
 
 ## Attribution by condition
 
@@ -46,7 +58,7 @@ Reading the deltas against the commits:
   spikes no longer masquerade as periods, so the surviving candidates are
   real ones.
 
-## Two honest gaps the study exposes
+## Two honest gaps the study exposed — CLOSED same day, see headline
 
 **1. The window subsampling can still drop a fundamental — Fix 2's deferred
 consensus stage now has its measured failure.** In 6 remaining window

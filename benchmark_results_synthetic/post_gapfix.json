@@ -1,0 +1,2661 @@
+[
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   11,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   3
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   11,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   3
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   16,
+   35
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   14,
+   28
+  ],
+  "lags": [
+   1,
+   7,
+   4
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   11,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   3
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   11,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   3
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   16,
+   35
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   14,
+   28
+  ],
+  "lags": [
+   1,
+   7,
+   4
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   8,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   9,
+   62
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   8,
+   27
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 60,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   7,
+   16,
+   35
+  ],
+  "lags": [
+   1,
+   7,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   7,
+   14,
+   28
+  ],
+  "lags": [
+   1,
+   7,
+   4
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_7",
+  "planted": [
+   7
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 70,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   18,
+   30,
+   37,
+   60
+  ],
+  "lags": [
+   1,
+   30,
+   37
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   12,
+   30,
+   37,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   37
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   12,
+   19,
+   30,
+   60
+  ],
+  "lags": [
+   1,
+   30,
+   19
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   19,
+   30,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   15,
+   30,
+   120
+  ],
+  "lags": [
+   1,
+   30,
+   5
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   30,
+   34,
+   120
+  ],
+  "lags": [
+   1,
+   30,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   18,
+   30,
+   37,
+   60
+  ],
+  "lags": [
+   1,
+   30,
+   37
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   12,
+   30,
+   37,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   37
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   12,
+   19,
+   30,
+   60
+  ],
+  "lags": [
+   1,
+   30,
+   19
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   19,
+   30,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   15,
+   30,
+   120
+  ],
+  "lags": [
+   1,
+   30,
+   5
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   30,
+   34,
+   120
+  ],
+  "lags": [
+   1,
+   30,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   15,
+   30,
+   60
+  ],
+  "lags": [
+   1,
+   30,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   14,
+   30,
+   37,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   37
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 90,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   12,
+   30,
+   59
+  ],
+  "lags": [
+   1,
+   30,
+   6
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   19,
+   29,
+   59
+  ],
+  "lags": [
+   1,
+   29,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   15,
+   30,
+   116
+  ],
+  "lags": [
+   1,
+   30,
+   5
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   30,
+   34,
+   120
+  ],
+  "lags": [
+   1,
+   30,
+   9
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_30",
+  "planted": [
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   5
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   13,
+   46,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   13
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   90,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   8,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   8
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   36,
+   73,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   36
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   5
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   13,
+   46,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   13
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   90,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   8,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   8
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   36,
+   73,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   36
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   23,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   23
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 0,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   13,
+   56,
+   91,
+   348
+  ],
+  "lags": [
+   1,
+   91,
+   13
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 3,
+  "seed": 1,
+  "n": 273,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   4,
+   90,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   3,
+   47,
+   91,
+   348
+  ],
+  "lags": [
+   1,
+   91,
+   2
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 455,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   8,
+   47,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   8
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   36,
+   73,
+   92,
+   364
+  ],
+  "lags": [
+   1,
+   92,
+   36
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "single_91",
+  "planted": [
+   91
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 910,
+  "win_hits": [
+   true
+  ],
+  "lag_hits": [
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   7,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   5,
+   6,
+   7,
+   30,
+   57
+  ],
+  "lags": [
+   1,
+   7,
+   30,
+   6
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   7,
+   9,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   7,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   14,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   7,
+   9,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   14,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   14,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 150,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   7,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   7,
+   9,
+   28,
+   30
+  ],
+  "lags": [
+   1,
+   7,
+   30
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_7_30",
+  "planted": [
+   7,
+   30
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 300,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   11,
+   15,
+   31,
+   32
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   31,
+   44
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "high_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "high_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   11,
+   15,
+   31,
+   32
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   31,
+   44
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "mid_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "mid_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   31,
+   32
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 0,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   5,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "low_snr",
+  "cycles": 5,
+  "seed": 1,
+  "n": 155,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   6,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 0,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": true,
+  "windows": [
+   1,
+   2,
+   9,
+   11,
+   30,
+   31
+  ],
+  "lags": [
+   1,
+   11,
+   31
+  ],
+  "strategy": "pooled_ensemble",
+  "kind": "planted",
+  "signal": "pair_11_31",
+  "planted": [
+   11,
+   31
+  ],
+  "snr": "low_snr",
+  "cycles": 10,
+  "seed": 1,
+  "n": 310,
+  "win_hits": [
+   true,
+   true
+  ],
+  "lag_hits": [
+   true,
+   true
+  ]
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_90",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 0,
+  "n": 90,
+  "win_hits": [],
+  "lag_hits": []
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_90",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 1,
+  "n": 90,
+  "win_hits": [],
+  "lag_hits": []
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_365",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 0,
+  "n": 365,
+  "win_hits": [],
+  "lag_hits": []
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_365",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 1,
+  "n": 365,
+  "win_hits": [],
+  "lag_hits": []
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_910",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 0,
+  "n": 910,
+  "win_hits": [],
+  "lag_hits": []
+ },
+ {
+  "ts": false,
+  "windows": [],
+  "lags": [],
+  "strategy": "None",
+  "kind": "noise",
+  "signal": "noise_910",
+  "planted": [],
+  "snr": "-",
+  "cycles": 0,
+  "seed": 1,
+  "n": 910,
+  "win_hits": [],
+  "lag_hits": []
+ }
+]

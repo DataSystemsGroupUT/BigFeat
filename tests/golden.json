@@ -44,43 +44,43 @@
   "reg_ts_nonstationary": {
     "detection_strategy": "pooled_ensemble",
     "fit": {
-      "sha256": "7e3e143cd6233cf2817d75baebb5047753949900b9c335c334572a706a96acc0",
+      "sha256": "f77f352c9558b7c4bfde751a5955ff255c8b75f10e9c2fb772f60fbc68f3d563",
       "shape": [
         300,
         5
       ],
-      "sum": 799.9001
+      "sum": 424.3303
     },
     "n_features": 5,
     "time_series_enabled": true,
     "transform": {
-      "sha256": "7e3e143cd6233cf2817d75baebb5047753949900b9c335c334572a706a96acc0",
+      "sha256": "f77f352c9558b7c4bfde751a5955ff255c8b75f10e9c2fb772f60fbc68f3d563",
       "shape": [
         300,
         5
       ],
-      "sum": 799.9001
+      "sum": 424.3303
     }
   },
   "reg_ts_periodic": {
     "detection_strategy": "ensemble",
     "fit": {
-      "sha256": "fbbaf793281968f834373da2a527027750f5558f13ce27fcdb66e558f8ce0cbd",
+      "sha256": "3258be638bb7e7370350b15818729790770998280fb86a891903da45d4aebf9e",
       "shape": [
         300,
-        5
+        4
       ],
-      "sum": 9.9922
+      "sum": 10.6788
     },
-    "n_features": 5,
+    "n_features": 4,
     "time_series_enabled": true,
     "transform": {
-      "sha256": "fbbaf793281968f834373da2a527027750f5558f13ce27fcdb66e558f8ce0cbd",
+      "sha256": "3258be638bb7e7370350b15818729790770998280fb86a891903da45d4aebf9e",
       "shape": [
         300,
-        5
+        4
       ],
-      "sum": 9.9922
+      "sum": 10.6788
     }
   }
 }
