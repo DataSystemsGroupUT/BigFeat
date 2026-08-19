@@ -446,19 +446,42 @@ class BigFeat:
                 else:
                      feature_cols = [f'feature_{i}' for i in range(X.shape[1])]
 
+            # Build the frame the DETECTORS see. Target-aware detection (R1):
+            # the periodicity that matters for prediction is the TARGET's --
+            # a feature can carry a 5-day cycle while y follows an 11-day one,
+            # and windows tuned to the features' rhythm miss the signal that
+            # matters. y was accepted by this method and never used; it now
+            # joins the detection frame as a synthetic column, FIRST in the
+            # column list so its periods lead the fundamentals stash. The
+            # column exists only in this local frame: self.feature_columns and
+            # self.original_data are untouched, so it can never leak into
+            # feature generation or transform().
+            if isinstance(X, pd.DataFrame):
+                _det_df = (self.original_data if hasattr(self, 'original_data')
+                           else X).copy()
+            elif hasattr(self, 'original_data') and isinstance(self.original_data, pd.DataFrame):
+                _det_df = self.original_data.copy()
+            else:
+                _det_df = pd.DataFrame(X)
+
+            _det_cols = list(feature_cols)
+            _TGT = '__bigfeat_target__'
+            if y is not None:
+                try:
+                    _y_arr = np.asarray(y, dtype=float).ravel()
+                    if len(_y_arr) == len(_det_df) and np.isfinite(_y_arr).any():
+                        _det_df[_TGT] = _y_arr
+                        _det_cols = [_TGT] + _det_cols
+                except (TypeError, ValueError):
+                    pass
+
             # Step 3: The Stationarity Gate (NEW)
             # Calculate avg lag-1 autocorrelation BEFORE periodicity voting
             try:
-                # Defensive check for DataFrame conversion (Task 11)
-                if isinstance(X, pd.DataFrame):
-                    df = self.original_data if hasattr(self, 'original_data') else X
-                elif hasattr(self, 'original_data') and isinstance(self.original_data, pd.DataFrame):
-                     df = self.original_data
-                else:
-                    df = pd.DataFrame(X)
+                df = _det_df
 
                 is_highly_non_stationary, _stat_diag = \
-                    self._assess_stationarity(df, feature_cols)
+                    self._assess_stationarity(df, _det_cols)
                 avg_lag1 = self.avg_lag1
 
                 if self.verbose and is_highly_non_stationary:
@@ -497,9 +520,9 @@ class BigFeat:
                     )
                     
                     is_periodic, conf, feat_confs = det.assess_periodicity(
-                        self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                        _det_df,
                         self.datetime_col,
-                        feature_cols,
+                        _det_cols,
                         groupby_cols=self.groupby_cols
                     )
 
@@ -552,9 +575,9 @@ class BigFeat:
                     if res['is_periodic']:
                         # Get windows from this specific detector
                         det_windows, strategy_suffix = res['instance'].smart_window_selection(
-                            self.original_data if isinstance(X, pd.DataFrame) else pd.DataFrame(X),
+                            _det_df,
                             self.datetime_col,
-                            feature_cols,
+                            _det_cols,
                             groupby_cols=self.groupby_cols
                         )
                         all_candidate_windows.extend(det_windows)

@@ -479,3 +479,44 @@ def test_unit_root_below_the_lag1_radar_is_still_restricted():
         f"reached the FULL operator pool; rolling/smoothing operators will "
         f"describe the trend, not the signal"
     )
+
+
+# ---------------------------------------------------------------------------
+# Detection must see the TARGET's periodicity (PIPELINE_STAGE_REVIEW.md R1)
+# ---------------------------------------------------------------------------
+
+def test_detection_sees_the_targets_period_not_only_the_features():
+    """Features carry a 5-day cycle; the TARGET follows an 11-day cycle that
+    no feature contains. The periodicity that matters for prediction is the
+    target's, yet _setup_time_series accepted y and never used it -- so the
+    windows and lags were tuned to the features' rhythm only.
+
+    After R1, the 11-day target period must appear in the windows and the
+    derived lags. (5 and 11 share no small multiples, so neither ladder can
+    fake the other: 5 -> {2.5, 10, 20}, 11 -> {5.5, 22, 44}; the 10 and 5.5
+    ladder rungs sit outside the 10..12 assertion window used below? 10 is
+    inside 10..12 -- so assert 11 via lags, where ladders never enter, and
+    via a tight 11 +- 1 window check.)"""
+    rs = np.random.RandomState(0)
+    n = 600
+    t = np.arange(n)
+    X = pd.DataFrame({
+        "date": pd.date_range("2021-01-01", periods=n, freq="D"),
+        "a": 10 * np.sin(2 * np.pi * t / 5) + rs.randn(n) * 0.4,
+        "b": 8 * np.sin(2 * np.pi * t / 5 + 0.7) + rs.randn(n) * 0.4,
+    })
+    y = pd.Series(12 * np.sin(2 * np.pi * t / 11) + rs.randn(n) * 0.4)
+
+    bf = bb.BigFeat(task_type="regression", enable_time_series="auto",
+                    datetime_col="date", verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        bf.fit(X, y, gen_size=2, iterations=1, random_state=0)
+
+    assert bf.enable_time_series, "strongly periodic fixture must enable TS"
+    lag_days = sorted(getattr(l, "days", l) for l in bf.lag_periods)
+    win_days = sorted(w.days for w in bf.window_sizes)
+    assert any(10 <= d <= 12 for d in lag_days), (
+        f"target's 11d period missing from lags {lag_days} "
+        f"(windows {win_days}): detection is target-blind"
+    )
