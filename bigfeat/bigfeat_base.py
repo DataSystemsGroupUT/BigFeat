@@ -398,6 +398,10 @@ class BigFeat:
                 # Prefer detected fundamentals (Fix 3); positional fallback.
                 _pairs = getattr(self.window_detector,
                                  'last_detected_periods', []) or []
+                self.detected_fundamentals = [
+                    pd.Timedelta(days=d)
+                    for d in self._consense_fundamental_days(_pairs)
+                ]
                 _lags = self._derive_lag_periods_from_fundamentals(_pairs)
                 if _lags is not None:
                     self.lag_periods = _lags
@@ -656,6 +660,10 @@ class BigFeat:
                         if _res['is_periodic']:
                             _pairs.extend(getattr(_res['instance'],
                                                   'last_detected_periods', []))
+                    self.detected_fundamentals = [
+                        pd.Timedelta(days=d)
+                        for d in self._consense_fundamental_days(_pairs)
+                    ]
                     _lags = self._derive_lag_periods_from_fundamentals(_pairs)
                     if _lags is not None:
                         self.lag_periods = _lags
@@ -2014,6 +2022,36 @@ class BigFeat:
         return avg_lag1 > 0.85, diag
 
     @staticmethod
+    def _consense_fundamental_days(pairs, max_k=3):
+        """Cluster raw (period_days, confidence) pairs into fundamentals.
+
+        Greedy +-15% clustering with confidence-weighted means; clusters
+        ranked by summed confidence so a period seen by several detectors
+        outranks a single detector's stray peak. Returns up to max_k integer
+        day values, strongest first. Shared by lag derivation (Fix 3) and
+        the cyclical encodings (R2).
+        """
+        clusters = []          # each: [weighted_period_sum, weight]
+        for period, conf in sorted(pairs, key=lambda x: -x[1]):
+            if period <= 0 or conf <= 0:
+                continue
+            for c in clusters:
+                centre = c[0] / c[1]
+                if abs(period - centre) <= 0.15 * max(period, centre):
+                    c[0] += period * conf
+                    c[1] += conf
+                    break
+            else:
+                clusters.append([period * conf, conf])
+        clusters.sort(key=lambda c: -c[1])
+        out = []
+        for c in clusters[:max_k]:
+            d = max(1, int(round(c[0] / c[1])))
+            if d not in out:
+                out.append(d)
+        return out
+
+    @staticmethod
     def _derive_lag_periods_from_fundamentals(pairs, max_lags=2):
         """Lag periods from detected fundamentals (PIPELINE_FIXES_SPEC Fix 3).
 
@@ -2031,25 +2069,12 @@ class BigFeat:
         cluster, clusters ranked by summed confidence so a period seen by
         several detectors outranks a single detector's stray peak.
         """
-        clusters = []          # each: [weighted_period_sum, weight]
-        for period, conf in sorted(pairs, key=lambda x: -x[1]):
-            if period <= 0 or conf <= 0:
-                continue
-            for c in clusters:
-                centre = c[0] / c[1]
-                if abs(period - centre) <= 0.15 * max(period, centre):
-                    c[0] += period * conf
-                    c[1] += conf
-                    break
-            else:
-                clusters.append([period * conf, conf])
-        if not clusters:
+        days = BigFeat._consense_fundamental_days(pairs, max_k=max_lags)
+        if not days:
             return None
-        clusters.sort(key=lambda c: -c[1])
         lags = [pd.Timedelta(days=1)]
-        for c in clusters[:max_lags]:
-            days = max(1, int(round(c[0] / c[1])))
-            td = pd.Timedelta(days=days)
+        for d in days:
+            td = pd.Timedelta(days=d)
             if td not in lags:
                 lags.append(td)
         return lags
@@ -2076,6 +2101,7 @@ class BigFeat:
         self.unary_operators = [np.abs, np.square, local_utils.original_feat]
 
         for attr in ('_ts_operators_added', 'time_series_operators',
+                     'detected_fundamentals',
                      '_trend_mode_active', '_effective_ts_weight_multiplier',
                      'avg_consensus_confidence', 'avg_lag1'):
             if hasattr(self, attr):
@@ -2299,6 +2325,64 @@ class BigFeat:
             self._was_downsampled = False
 
         return X_for_fit, y_for_fit
+
+    # Fixed epoch for the cyclical encodings. The phase must be a pure
+    # function of the TIMESTAMP so that the same date yields the same value
+    # at fit and transform time, for any row order and any entity -- that is
+    # what makes the encoding leak-proof by construction. Anchoring to a
+    # constant (rather than each frame's own min date) is what guarantees
+    # fit/transform consistency.
+    _CYCLICAL_EPOCH = pd.Timestamp('2000-01-01')
+
+    def _cyclical_phase(self, feature_data, window_size, context_data, fn):
+        """Shared body of the sin/cos encodings (R2).
+
+        sin(2*pi * t/P), cos(2*pi * t/P) at each detected period P is the
+        standard regression representation of seasonality (Hyndman &
+        Athanasopoulos, fpp3 sec 7.4): smooth, and it hands tree models the
+        PHASE information that raw lags express only indirectly. The source
+        column is ignored except as a length fallback -- the encoding reads
+        the clock, not the data.
+        """
+        data_source = context_data if context_data is not None \
+            else getattr(self, '_current_data', None)
+
+        if isinstance(window_size, str):
+            window_size = pd.Timedelta(window_size)
+        if isinstance(window_size, pd.Timedelta):
+            period_days = window_size / pd.Timedelta(days=1)
+        elif window_size is not None:
+            period_days = float(window_size)
+        else:
+            period_days = 7.0
+        period_days = max(period_days, 1e-9)
+
+        try:
+            if (self.enable_time_series and data_source is not None
+                    and hasattr(data_source, 'columns')
+                    and self.datetime_col in data_source.columns):
+                ts = pd.to_datetime(data_source[self.datetime_col])
+                days = (ts - self._CYCLICAL_EPOCH) / pd.Timedelta(days=1)
+                return fn(2.0 * np.pi * days.values / period_days)
+            # No datetime context: index-based fallback (fit-internal only).
+            n = len(feature_data)
+            return fn(2.0 * np.pi * np.arange(n) / period_days)
+        except Exception as e:
+            if self.verbose:
+                print(f"Error in cyclical encoding: {e}")
+            return np.zeros(len(feature_data))
+
+    def _safe_cyclical_sin(self, feature_data, window_size=None,
+                           context_data=None, **kwargs):
+        """sin(2*pi * t/P) at a detected period P -- see _cyclical_phase."""
+        return self._cyclical_phase(feature_data, window_size, context_data,
+                                    np.sin)
+
+    def _safe_cyclical_cos(self, feature_data, window_size=None,
+                           context_data=None, **kwargs):
+        """cos(2*pi * t/P) at a detected period P -- see _cyclical_phase."""
+        return self._cyclical_phase(feature_data, window_size, context_data,
+                                    np.cos)
 
     def _calculate_block_params(self, total_limit, max_window_size=None, padding=0):
         """
@@ -3189,7 +3273,11 @@ class BigFeat:
             # Select time step for this operation branch
             params['time_step'] = self.rng.choice(self.window_step_options) if self.window_step_options else 'D'
             
-            if 'lag' in op_name or 'diff' in op_name or 'pct_change' in op_name or 'momentum' in op_name:
+            if 'cyclical' in op_name:
+                _fund = getattr(self, 'detected_fundamentals', None)
+                params['window_size'] = self.rng.choice(
+                    _fund if _fund else self.window_sizes)
+            elif 'lag' in op_name or 'diff' in op_name or 'pct_change' in op_name or 'momentum' in op_name:
                 params['lag_period'] = self.rng.choice(self.lag_periods)
             elif 'ewm' in op_name:
                 params['window_size'] = self.rng.choice(self.window_sizes)
@@ -3552,7 +3640,9 @@ class BigFeat:
                 self._safe_seasonal_decompose,
                 self._safe_trend_feature,
                 self._safe_weekday_mean,
-                self._safe_month_mean
+                self._safe_month_mean,
+                self._safe_cyclical_sin,
+                self._safe_cyclical_cos
             ]
 
         # Extend the original operators with time series operators

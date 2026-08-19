@@ -65,22 +65,22 @@
   "reg_ts_periodic": {
     "detection_strategy": "ensemble",
     "fit": {
-      "sha256": "ef89a624774a8f3b7e8d02a9b26b26fe3db8bffb1c3070bf6917950c9a4d8cad",
+      "sha256": "fbbaf793281968f834373da2a527027750f5558f13ce27fcdb66e558f8ce0cbd",
       "shape": [
         300,
-        4
+        5
       ],
-      "sum": 9.9681
+      "sum": 9.9922
     },
-    "n_features": 4,
+    "n_features": 5,
     "time_series_enabled": true,
     "transform": {
-      "sha256": "ef89a624774a8f3b7e8d02a9b26b26fe3db8bffb1c3070bf6917950c9a4d8cad",
+      "sha256": "fbbaf793281968f834373da2a527027750f5558f13ce27fcdb66e558f8ce0cbd",
       "shape": [
         300,
-        4
+        5
       ],
-      "sum": 9.9681
+      "sum": 9.9922
     }
   }
 }

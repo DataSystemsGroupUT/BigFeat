@@ -35,7 +35,7 @@ feature. `transform` replays them on new data.
 
 | File | Lines | Responsibility |
 |---|---|---|
-| `bigfeat/bigfeat_base.py` | 3576 | The `BigFeat` class: `fit`, `transform`, the generation loop, the 15 time-series operators, the time-series machinery, block downsampling |
+| `bigfeat/bigfeat_base.py` | 3576 | The `BigFeat` class: `fit`, `transform`, the generation loop, the 17 time-series operators, the time-series machinery, block downsampling |
 | `bigfeat/window_detector_base.py` | 269 | `BaseWindowDetector`: shared detector behaviour — datetime-column detection, sampling-rate inference, sample→day conversion, window ladders, the periodicity verdict |
 | `bigfeat/dft_window_detector.py` | 379 | Fourier-based periodicity detection |
 | `bigfeat/acf_window_detector.py` | 349 | Autocorrelation-based detection |
@@ -213,7 +213,7 @@ wrong on 100% of rows across all 25 benchmark datasets
 
 ### Operator dispatch
 
-The 15 `_safe_*` operators are thin wrappers. Each resolves its source column
+The 17 `_safe_*` operators are thin wrappers. Each resolves its source column
 via `_resolve_feature_col(params['feature_index'])` and delegates to
 `_apply_time_based_operation`, which dispatches on an operation string:
 
@@ -246,7 +246,7 @@ full set:
 |---|---|---|
 | `avg_lag1 > 0.85` (non-stationary) or consensus confidence < 0.5 | Restricted | lag, diff only |
 | Not periodic but strongly autocorrelated | Trend | diff, pct_change, lag (weights ×3) |
-| Otherwise | Full | all 15 |
+| Otherwise | Full | all 17 |
 
 ---
 

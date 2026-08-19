@@ -520,3 +520,66 @@ def test_detection_sees_the_targets_period_not_only_the_features():
         f"target's 11d period missing from lags {lag_days} "
         f"(windows {win_days}): detection is target-blind"
     )
+
+
+# ---------------------------------------------------------------------------
+# Cyclical sin/cos encodings at detected periods (PIPELINE_STAGE_REVIEW.md R2)
+# ---------------------------------------------------------------------------
+
+def test_cyclical_operators_join_the_full_pool():
+    """R2: sin/cos at detected periods -- the standard forecasting
+    representation of seasonality (fpp3 sec 7.4) -- previously absent from
+    the operator pool entirely."""
+    bf = _fit_fixture()          # periodic 7+30d fixture, full mode
+    names = {getattr(op, "__name__", "") for op in bf.operators}
+    assert "_safe_cyclical_sin" in names, f"sin encoding missing: {sorted(names)}"
+    assert "_safe_cyclical_cos" in names, f"cos encoding missing"
+
+
+def test_cyclical_encoding_is_a_pure_function_of_the_timestamp():
+    """The phase must anchor to the timestamp against a fixed epoch, not the
+    row position: same date -> same value, regardless of row order, entity,
+    or whether it is computed at fit or transform time. That is what makes
+    the encoding leak-proof by construction."""
+    n = 60
+    df = pd.DataFrame({
+        "date": pd.date_range("2021-01-01", periods=n, freq="D"),
+        "v": np.arange(n, dtype=float),
+    })
+    bf = bb.BigFeat(task_type="regression", enable_time_series="yes",
+                    datetime_col="date", verbose=False)
+    bf.enable_time_series = True
+    bf.datetime_col = "date"
+    bf.feature_columns = ["v"]
+
+    P = pd.Timedelta(days=7)
+    straight = np.asarray(
+        bf._safe_cyclical_sin(df["v"].values, window_size=P, context_data=df),
+        dtype=float)
+
+    # exact value: sin(2*pi * days_since_epoch / 7)
+    epoch = pd.Timestamp("2000-01-01")
+    days = (df["date"] - epoch) / pd.Timedelta(days=1)
+    expected = np.sin(2 * np.pi * days.values / 7.0)
+    np.testing.assert_allclose(straight, expected, rtol=1e-9, atol=1e-9)
+
+    # row order must not matter
+    perm = np.random.RandomState(0).permutation(n)
+    shuffled = df.iloc[perm].reset_index(drop=True)
+    out = np.asarray(
+        bf._safe_cyclical_sin(shuffled["v"].values, window_size=P,
+                              context_data=shuffled), dtype=float)
+    np.testing.assert_allclose(out, expected[perm], rtol=1e-9, atol=1e-9,
+                               err_msg="encoding depends on row order")
+
+
+def test_detected_fundamentals_are_stored_for_downstream_consumers():
+    """Fix 3 clustered fundamentals only inside lag derivation; R2 needs the
+    same list as the period source for cyclical encodings, so it becomes a
+    stored attribute."""
+    bf = _fit_fixture()
+    fund = getattr(bf, "detected_fundamentals", None)
+    assert fund, "detected_fundamentals not stored"
+    days = sorted(getattr(f, "days", f) for f in fund)
+    assert any(6 <= d <= 8 for d in days), f"7d fundamental missing: {days}"
+    assert any(26 <= d <= 34 for d in days), f"30d fundamental missing: {days}"
