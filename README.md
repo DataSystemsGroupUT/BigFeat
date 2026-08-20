@@ -218,6 +218,9 @@ if you train a downstream model on the same transformed target.
 - [`docs/BENCHMARK_DESIGN.md`](docs/BENCHMARK_DESIGN.md) — what to evaluate
   the time-series subsystem on, and why the current Monash suite cannot
   exercise it.
+- [`docs/PIPELINE_IMPROVEMENTS.md`](docs/PIPELINE_IMPROVEMENTS.md) — the
+  detection-quality improvement series: what changed at each pipeline
+  stage and the ground-truth before/after (69%→100% period recovery).
 - [`docs/CORRECTNESS_FIXES.md`](docs/CORRECTNESS_FIXES.md) — correctness review
   of the time-series subsystem: defects found, how each was verified, and the
   benchmark impact. **Read this before relying on results collected before the
