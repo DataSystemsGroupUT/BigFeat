@@ -218,6 +218,10 @@ if you train a downstream model on the same transformed target.
 - [`docs/BENCHMARK_DESIGN.md`](docs/BENCHMARK_DESIGN.md) — what to evaluate
   the time-series subsystem on, and why the current Monash suite cannot
   exercise it.
+- [`docs/PIPELINE_CHANGES_JUSTIFIED.md`](docs/PIPELINE_CHANGES_JUSTIFIED.md) —
+  every pipeline change across both rounds, organised by stage, each with
+  its motivating evidence and design justification. The hand-to-a-reviewer
+  document.
 - [`docs/PILOT_BIKE.md`](docs/PILOT_BIKE.md) — first multivariate accuracy
   pilot: feature engineering is redundant when calendar columns are given,
   and substitutes for them (−59% MAE) when they are not.
